@@ -102,8 +102,7 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	r.reconcile(ctx, &data, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
+	if !r.reconcile(ctx, &data, &resp.Diagnostics) {
 		return
 	}
 
@@ -149,8 +148,7 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	r.reconcile(ctx, &plan, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
+	if !r.reconcile(ctx, &plan, &resp.Diagnostics) {
 		return
 	}
 
@@ -203,11 +201,15 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 }
 
 // reconcile drives the live service towards the desired boot and run state in
-// data, then overwrites data with the state the server reports back. Terraform
-// rejects an applied value that disagrees with a known plan, so a server that
-// refuses the requested state is reported as an actionable error instead.
-func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceModel, diags *diag.Diagnostics) {
+// data, then overwrites data with the state the server reports back. It reports
+// whether data now holds server-reported state and is safe to persist, which is
+// also true when the server refused the requested state: Terraform skips the
+// plan-conformance check once a provider has raised an error, so recording the
+// side effects that did land keeps the resource tracked.
+func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceModel, diags *diag.Diagnostics) bool {
 	name := data.Name.ValueString()
+	wantEnable := data.Enable.ValueBool()
+	wantRunning := data.Running.ValueBool()
 
 	svc, err := r.services.Service.Get(ctx, name)
 	if err != nil {
@@ -215,7 +217,7 @@ func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceMo
 			"Unable to Read Service",
 			fmt.Sprintf("Unable to query service %q: %s", name, err.Error()),
 		)
-		return
+		return false
 	}
 
 	if svc == nil {
@@ -223,26 +225,26 @@ func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceMo
 			"Unknown Service",
 			fmt.Sprintf("TrueNAS does not offer a service named %q.%s", name, r.knownServiceNames(ctx)),
 		)
-		return
+		return false
 	}
 
-	if enable := data.Enable.ValueBool(); enable != svc.Enable {
-		if err := r.services.Service.SetEnable(ctx, name, enable); err != nil {
+	if wantEnable != svc.Enable {
+		if err := r.services.Service.SetEnable(ctx, name, wantEnable); err != nil {
 			diags.AddError(
 				"Unable to Update Service",
-				fmt.Sprintf("Unable to set enable=%t on service %q: %s", enable, name, err.Error()),
+				fmt.Sprintf("Unable to set enable=%t on service %q: %s", wantEnable, name, err.Error()),
 			)
-			return
+			return false
 		}
 	}
 
-	if running := data.Running.ValueBool(); running != svc.Running() {
-		if err := r.setRunning(ctx, name, running); err != nil {
+	if wantRunning != svc.Running() {
+		if err := r.setRunning(ctx, name, wantRunning); err != nil {
 			diags.AddError(
 				"Unable to Control Service",
-				fmt.Sprintf("Unable to %s service %q: %s", startOrStop(running), name, err.Error()),
+				fmt.Sprintf("Unable to %s service %q: %s", startOrStop(wantRunning), name, err.Error()),
 			)
-			return
+			return false
 		}
 	}
 
@@ -254,7 +256,7 @@ func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceMo
 			"Unable to Read Service",
 			fmt.Sprintf("Unable to query service %q: %s", name, err.Error()),
 		)
-		return
+		return false
 	}
 
 	if svc == nil {
@@ -262,40 +264,32 @@ func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceMo
 			"Service Not Found",
 			fmt.Sprintf("Service %q disappeared while it was being configured.", name),
 		)
-		return
-	}
-
-	mismatch := false
-
-	if enable := data.Enable.ValueBool(); enable != svc.Enable {
-		mismatch = true
-		diags.AddError(
-			"Service Enable Not Applied",
-			fmt.Sprintf("Service %q reports enable=%t after its update call succeeded, but the configuration asks for enable=%t.",
-				name, svc.Enable, enable),
-		)
-	}
-
-	if running := data.Running.ValueBool(); running != svc.Running() {
-		mismatch = true
-		if running {
-			diags.AddError(
-				"Service Not Running",
-				fmt.Sprintf("Service %q did not stay running after its start call succeeded. Check the service's logs on the appliance for why it stopped.", name),
-			)
-		} else {
-			diags.AddError(
-				"Service Still Running",
-				fmt.Sprintf("Service %q is still running after its stop call succeeded. Check the service's logs on the appliance for why it stayed up.", name),
-			)
-		}
-	}
-
-	if mismatch {
-		return
+		return false
 	}
 
 	mapServiceToModel(svc, data)
+
+	if svc.Enable != wantEnable {
+		diags.AddError(
+			"Service Enable Not Applied",
+			fmt.Sprintf("Service %q reports enable = %t after reconciliation, but Terraform requested enable = %t.",
+				name, svc.Enable, wantEnable),
+		)
+	}
+
+	if svc.Running() != wantRunning {
+		summary := "Service Still Running"
+		if wantRunning {
+			summary = "Service Not Running"
+		}
+		diags.AddError(
+			summary,
+			fmt.Sprintf("Terraform requested running = %t for service %q, but the service reports %s after reconciliation. Check the service's logs on the appliance.",
+				wantRunning, name, svc.State),
+		)
+	}
+
+	return true
 }
 
 // setRunning starts or stops the service to match running.

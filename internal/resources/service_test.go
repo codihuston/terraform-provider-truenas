@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/deevus/terraform-provider-truenas/internal/services"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -483,15 +484,45 @@ func TestServiceResource_Create_ServiceDoesNotStayRunning(t *testing.T) {
 		Plan: tfsdk.Plan{Schema: schemaResp.Schema, Raw: createServiceModelValue(enabledServiceParams())},
 	}, resp)
 
-	if !resp.Diagnostics.HasError() {
-		t.Fatal("expected error")
+	assertServiceDiagnostic(t, resp.Diagnostics, "Service Not Running", "STOPPED")
+	if rec.started != 1 {
+		t.Errorf("expected 1 start, got %d", rec.started)
 	}
-	err := resp.Diagnostics.Errors()[0]
-	if err.Summary() != "Service Not Running" {
-		t.Errorf("unexpected summary %q", err.Summary())
+
+	// The enable did land, so it has to reach state even though the apply failed.
+	data := serviceStateModel(t, resp.State)
+	if !data.Enable.ValueBool() || data.Running.ValueBool() {
+		t.Errorf("expected state enable=true running=false, got %v/%v", data.Enable, data.Running)
 	}
-	if !strings.Contains(err.Detail(), `"nfs"`) {
-		t.Errorf("expected detail to name the service, got %q", err.Detail())
+	if data.ID.ValueString() != "nfs" {
+		t.Errorf("expected state to be populated with id 'nfs', got %v", data.ID)
+	}
+}
+
+func TestServiceResource_Create_ServiceDiesWithoutControlCall(t *testing.T) {
+	rec := &serviceRecorder{gets: []*services.SystemService{
+		runningService(),
+		{ID: 9, Name: "nfs", Enable: true, State: "STOPPED"},
+	}}
+	r := newServiceResource(rec.mock())
+
+	schemaResp := getServiceResourceSchema(t)
+	resp := &resource.CreateResponse{State: tfsdk.State{Schema: schemaResp.Schema}}
+
+	r.Create(context.Background(), resource.CreateRequest{
+		Plan: tfsdk.Plan{Schema: schemaResp.Schema, Raw: createServiceModelValue(enabledServiceParams())},
+	}, resp)
+
+	assertServiceDiagnostic(t, resp.Diagnostics, "Service Not Running", "STOPPED")
+	// Nothing was out of line on the first read, so no control call was issued
+	// and the diagnostic must not claim one was.
+	if rec.started != 0 || rec.stopped != 0 || len(rec.enableCalls) != 0 {
+		t.Errorf("expected no control calls, got start=%d stop=%d enable=%v", rec.started, rec.stopped, rec.enableCalls)
+	}
+
+	data := serviceStateModel(t, resp.State)
+	if data.Running.ValueBool() {
+		t.Error("expected state running=false")
 	}
 }
 
@@ -509,15 +540,12 @@ func TestServiceResource_Create_EnableNotApplied(t *testing.T) {
 		Plan: tfsdk.Plan{Schema: schemaResp.Schema, Raw: createServiceModelValue(enabledServiceParams())},
 	}, resp)
 
-	if !resp.Diagnostics.HasError() {
-		t.Fatal("expected error")
-	}
-	err := resp.Diagnostics.Errors()[0]
-	if err.Summary() != "Service Enable Not Applied" {
-		t.Errorf("unexpected summary %q", err.Summary())
-	}
-	if !strings.Contains(err.Detail(), `"nfs"`) {
-		t.Errorf("expected detail to name the service, got %q", err.Detail())
+	assertServiceDiagnostic(t, resp.Diagnostics, "Service Enable Not Applied", "enable = false")
+
+	// The start did land, so it has to reach state even though the apply failed.
+	data := serviceStateModel(t, resp.State)
+	if data.Enable.ValueBool() || !data.Running.ValueBool() {
+		t.Errorf("expected state enable=false running=true, got %v/%v", data.Enable, data.Running)
 	}
 }
 
@@ -534,19 +562,46 @@ func TestServiceResource_Update_ServiceStaysRunning(t *testing.T) {
 			serviceModelParams{ID: "nfs", Name: "nfs", Enable: true, Running: false})},
 	}, resp)
 
-	if !resp.Diagnostics.HasError() {
+	assertServiceDiagnostic(t, resp.Diagnostics, "Service Still Running", "running = false")
+	if rec.stopped != 1 {
+		t.Errorf("expected 1 stop, got %d", rec.stopped)
+	}
+
+	data := serviceStateModel(t, resp.State)
+	if !data.Running.ValueBool() {
+		t.Error("expected state to record the service as still running")
+	}
+}
+
+// assertServiceDiagnostic checks the first error carries the given summary and
+// names both the service and the state the appliance actually reported.
+func assertServiceDiagnostic(t *testing.T, diags diag.Diagnostics, summary, detail string) {
+	t.Helper()
+	if !diags.HasError() {
 		t.Fatal("expected error")
 	}
-	err := resp.Diagnostics.Errors()[0]
-	if err.Summary() != "Service Still Running" {
+	err := diags.Errors()[0]
+	if err.Summary() != summary {
 		t.Errorf("unexpected summary %q", err.Summary())
 	}
 	if !strings.Contains(err.Detail(), `"nfs"`) {
 		t.Errorf("expected detail to name the service, got %q", err.Detail())
 	}
-	if rec.stopped != 1 {
-		t.Errorf("expected 1 stop, got %d", rec.stopped)
+	if !strings.Contains(err.Detail(), detail) {
+		t.Errorf("expected detail to contain %q, got %q", detail, err.Detail())
 	}
+}
+
+func serviceStateModel(t *testing.T, state tfsdk.State) ServiceResourceModel {
+	t.Helper()
+	if state.Raw.IsNull() {
+		t.Fatal("expected state to be populated, got null")
+	}
+	var data ServiceResourceModel
+	if diags := state.Get(context.Background(), &data); diags.HasError() {
+		t.Fatalf("unable to read state: %v", diags)
+	}
+	return data
 }
 
 func TestServiceResource_Create_InvalidPlan(t *testing.T) {
