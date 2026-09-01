@@ -58,6 +58,8 @@ resource "truenas_service" "ssh" {
 
 > **Note:** `name` is the service's API name, which is not always its display name — SMB is `cifs` and iSCSI is `iscsitarget`. The available names depend on the TrueNAS version and edition; applying an unknown name fails with the list the appliance does offer.
 
+> **Note:** Applying fails if the service does not reach the requested state — for example a service that starts and then exits because of its own configuration. The state Terraform records is the one the server reported, so a following plan shows the difference rather than hiding it.
+
 > **Note:** Changing `name` replaces the resource, which stops and disables the old service before adopting the new one.
 
 ## Import
