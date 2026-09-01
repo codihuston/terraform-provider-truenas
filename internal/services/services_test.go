@@ -9,6 +9,7 @@ import (
 func TestTrueNASServices_FieldTypes(t *testing.T) {
 	// Verify TrueNASServices accepts interface types (compile-time check)
 	_ = &TrueNASServices{
+		APIKey:     &MockAPIKeyService{},
 		App:        &truenas.MockAppService{},
 		CloudSync:  &truenas.MockCloudSyncService{},
 		Cron:       &truenas.MockCronService{},

@@ -376,6 +376,7 @@ func (p *TrueNASProvider) Configure(ctx context.Context, req provider.ConfigureR
 	version := finalClient.Version()
 	svc := &services.TrueNASServices{
 		Client:       finalClient,
+		APIKey:       services.NewAPIKeyService(finalClient),
 		App:          truenas.NewAppService(finalClient, version),
 		CloudSync:    truenas.NewCloudSyncService(finalClient, version),
 		Cron:         truenas.NewCronService(finalClient, version),
@@ -416,6 +417,7 @@ func (p *TrueNASProvider) Resources(ctx context.Context) []func() resource.Resou
 		resources.NewCloudSyncTaskResource,
 		resources.NewCronJobResource,
 		resources.NewServiceResource,
+		resources.NewAPIKeyResource,
 		resources.NewShareNFSResource,
 		resources.NewSnapshotTaskResource,
 		resources.NewVirtConfigResource,
