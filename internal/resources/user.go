@@ -546,17 +546,6 @@ func mapUserToModel(ctx context.Context, user *services.User, data *UserResource
 	return diags
 }
 
-// optionalString converts an optional attribute to a pointer, so an unset
-// attribute reaches the API as null rather than an empty string.
-func optionalString(value types.String) *string {
-	if value.IsNull() || value.IsUnknown() {
-		return nil
-	}
-
-	s := value.ValueString()
-	return &s
-}
-
 // optionalStringValue converts an API string back to an optional attribute,
 // mapping the empty string to null so an unset attribute stays unset.
 func optionalStringValue(s string) types.String {

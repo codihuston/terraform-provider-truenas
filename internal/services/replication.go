@@ -233,11 +233,11 @@ func replicationOptsToParams(opts CreateReplicationTaskOpts) map[string]any {
 		"transport":                  opts.Transport,
 		"ssh_credentials":            opts.SSHCredentials,
 		"sudo":                       opts.Sudo,
-		"source_datasets":            replicationStringList(opts.SourceDatasets),
+		"source_datasets":            stringList(opts.SourceDatasets),
 		"target_dataset":             opts.TargetDataset,
 		"recursive":                  opts.Recursive,
-		"exclude":                    replicationStringList(opts.Exclude),
-		"also_include_naming_schema": replicationStringList(opts.AlsoIncludeNamingSchema),
+		"exclude":                    stringList(opts.Exclude),
+		"also_include_naming_schema": stringList(opts.AlsoIncludeNamingSchema),
 		"auto":                       opts.Auto,
 		"schedule":                   replicationScheduleToParams(opts.Schedule),
 		"retention_policy":           opts.RetentionPolicy,
@@ -271,15 +271,6 @@ func replicationScheduleToParams(schedule *ReplicationSchedule) any {
 	}
 }
 
-// replicationStringList normalises a nil slice to an empty slice so the API
-// receives `[]` rather than `null`, which it rejects.
-func replicationStringList(in []string) []string {
-	if in == nil {
-		return []string{}
-	}
-	return in
-}
-
 // replicationTaskFromJSON decodes a single-task response body. method names the
 // API call for the error message.
 func replicationTaskFromJSON(body []byte, method string) (*ReplicationTask, error) {
@@ -301,11 +292,11 @@ func replicationTaskFromResponse(resp replicationTaskResponse) ReplicationTask {
 		Direction:               resp.Direction,
 		Transport:               resp.Transport,
 		Sudo:                    resp.Sudo,
-		SourceDatasets:          replicationStringList(resp.SourceDatasets),
+		SourceDatasets:          stringList(resp.SourceDatasets),
 		TargetDataset:           resp.TargetDataset,
 		Recursive:               resp.Recursive,
-		Exclude:                 replicationStringList(resp.Exclude),
-		AlsoIncludeNamingSchema: replicationStringList(resp.AlsoIncludeNamingSchema),
+		Exclude:                 stringList(resp.Exclude),
+		AlsoIncludeNamingSchema: stringList(resp.AlsoIncludeNamingSchema),
 		Auto:                    resp.Auto,
 		RetentionPolicy:         resp.RetentionPolicy,
 		LifetimeValue:           resp.LifetimeValue,

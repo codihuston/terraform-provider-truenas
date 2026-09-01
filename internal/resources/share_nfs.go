@@ -187,17 +187,17 @@ func buildShareNFSOpts(ctx context.Context, data *ShareNFSResourceModel) (servic
 		Path:            data.Path.ValueString(),
 		Comment:         data.Comment.ValueString(),
 		ReadOnly:        data.ReadOnly.ValueBool(),
-		MaprootUser:     nfsOptionalString(data.MaprootUser),
-		MaprootGroup:    nfsOptionalString(data.MaprootGroup),
-		MapallUser:      nfsOptionalString(data.MapallUser),
-		MapallGroup:     nfsOptionalString(data.MapallGroup),
+		MaprootUser:     optionalString(data.MaprootUser),
+		MaprootGroup:    optionalString(data.MaprootGroup),
+		MapallUser:      optionalString(data.MapallUser),
+		MapallGroup:     optionalString(data.MapallGroup),
 		Enabled:         data.Enabled.ValueBool(),
 		ExposeSnapshots: data.ExposeSnapshots.ValueBool(),
 	}
 
-	opts.Networks = nfsStringsFromList(ctx, data.Networks, &diags)
-	opts.Hosts = nfsStringsFromList(ctx, data.Hosts, &diags)
-	opts.Security = nfsStringsFromList(ctx, data.Security, &diags)
+	opts.Networks = stringsFromList(ctx, data.Networks, &diags)
+	opts.Hosts = stringsFromList(ctx, data.Hosts, &diags)
+	opts.Security = stringsFromList(ctx, data.Security, &diags)
 
 	return opts, diags
 }
@@ -354,10 +354,10 @@ func mapShareNFSToModel(share *services.NFSShare, data *ShareNFSResourceModel) {
 	data.Path = types.StringValue(share.Path)
 	data.Comment = types.StringValue(share.Comment)
 	data.ReadOnly = types.BoolValue(share.ReadOnly)
-	data.MaprootUser = nfsStringPointerValue(share.MaprootUser)
-	data.MaprootGroup = nfsStringPointerValue(share.MaprootGroup)
-	data.MapallUser = nfsStringPointerValue(share.MapallUser)
-	data.MapallGroup = nfsStringPointerValue(share.MapallGroup)
+	data.MaprootUser = stringPointerValue(share.MaprootUser)
+	data.MaprootGroup = stringPointerValue(share.MaprootGroup)
+	data.MapallUser = stringPointerValue(share.MapallUser)
+	data.MapallGroup = stringPointerValue(share.MapallGroup)
 	data.Enabled = types.BoolValue(share.Enabled)
 	data.ExposeSnapshots = types.BoolValue(share.ExposeSnapshots)
 
@@ -367,48 +367,8 @@ func mapShareNFSToModel(share *services.NFSShare, data *ShareNFSResourceModel) {
 		data.Locked = types.BoolNull()
 	}
 
-	data.Aliases = nfsListFromStrings(share.Aliases)
-	data.Networks = nfsListFromStrings(share.Networks)
-	data.Hosts = nfsListFromStrings(share.Hosts)
-	data.Security = nfsListFromStrings(share.Security)
-}
-
-// nfsOptionalString converts an optional string attribute to a pointer,
-// mapping null/unknown to nil so the API receives an explicit null.
-func nfsOptionalString(v types.String) *string {
-	if v.IsNull() || v.IsUnknown() {
-		return nil
-	}
-	s := v.ValueString()
-	return &s
-}
-
-// nfsStringPointerValue converts an API string pointer back to an attribute value.
-func nfsStringPointerValue(p *string) types.String {
-	if p == nil {
-		return types.StringNull()
-	}
-	return types.StringValue(*p)
-}
-
-// nfsStringsFromList reads a list attribute into a string slice, appending any
-// conversion errors to diags. Null and unknown lists yield an empty slice.
-func nfsStringsFromList(ctx context.Context, list types.List, diags *diag.Diagnostics) []string {
-	if list.IsNull() || list.IsUnknown() {
-		return []string{}
-	}
-
-	items := []string{}
-	diags.Append(list.ElementsAs(ctx, &items, false)...)
-	return items
-}
-
-// nfsListFromStrings converts a string slice from the API into a list attribute.
-// Every element is a known string, so the conversion cannot fail.
-func nfsListFromStrings(values []string) types.List {
-	elements := make([]attr.Value, len(values))
-	for i, v := range values {
-		elements[i] = types.StringValue(v)
-	}
-	return types.ListValueMust(types.StringType, elements)
+	data.Aliases = listFromStrings(share.Aliases)
+	data.Networks = listFromStrings(share.Networks)
+	data.Hosts = listFromStrings(share.Hosts)
+	data.Security = listFromStrings(share.Security)
 }

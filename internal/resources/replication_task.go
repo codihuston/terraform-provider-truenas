@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/deevus/terraform-provider-truenas/internal/services"
@@ -286,36 +287,43 @@ func (r *ReplicationTaskResource) Schema(ctx context.Context, req resource.Schem
 						Description: "Minute (0-59 or cron expression).",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("00"),
 					},
 					"hour": schema.StringAttribute{
 						Description: "Hour (0-23 or cron expression).",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("*"),
 					},
 					"dom": schema.StringAttribute{
 						Description: "Day of month (1-31 or cron expression).",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("*"),
 					},
 					"month": schema.StringAttribute{
 						Description: "Month (1-12 or cron expression).",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("*"),
 					},
 					"dow": schema.StringAttribute{
 						Description: "Day of week (1-7, Monday to Sunday, or cron expression).",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("*"),
 					},
 					"begin": schema.StringAttribute{
 						Description: "Earliest time of day the task may start, in `HH:MM`.",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("00:00"),
 					},
 					"end": schema.StringAttribute{
 						Description: "Latest time of day the task may start, in `HH:MM`.",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("23:59"),
 					},
 				},
 			},
@@ -423,57 +431,48 @@ func buildReplicationTaskOpts(ctx context.Context, data *ReplicationTaskResource
 		Name:             data.Name.ValueString(),
 		Direction:        data.Direction.ValueString(),
 		Transport:        data.Transport.ValueString(),
-		SSHCredentials:   replicationOptionalInt64(data.SSHCredentials),
+		SSHCredentials:   optionalInt64(data.SSHCredentials),
 		Sudo:             data.Sudo.ValueBool(),
 		TargetDataset:    data.TargetDataset.ValueString(),
 		Recursive:        data.Recursive.ValueBool(),
 		Auto:             schedule != nil,
 		Schedule:         schedule,
 		RetentionPolicy:  data.RetentionPolicy.ValueString(),
-		LifetimeValue:    replicationOptionalInt64(data.LifetimeValue),
-		LifetimeUnit:     nfsOptionalString(data.LifetimeUnit),
+		LifetimeValue:    optionalInt64(data.LifetimeValue),
+		LifetimeUnit:     optionalString(data.LifetimeUnit),
 		Readonly:         data.Readonly.ValueString(),
 		AllowFromScratch: data.AllowFromScratch.ValueBool(),
-		Compression:      nfsOptionalString(data.Compression),
-		SpeedLimit:       replicationOptionalInt64(data.SpeedLimit),
+		Compression:      optionalString(data.Compression),
+		SpeedLimit:       optionalInt64(data.SpeedLimit),
 		Retries:          data.Retries.ValueInt64(),
-		LoggingLevel:     nfsOptionalString(data.LoggingLevel),
+		LoggingLevel:     optionalString(data.LoggingLevel),
 		Enabled:          data.Enabled.ValueBool(),
 	}
 
-	opts.SourceDatasets = nfsStringsFromList(ctx, data.SourceDatasets, &diags)
-	opts.Exclude = nfsStringsFromList(ctx, data.Exclude, &diags)
-	opts.AlsoIncludeNamingSchema = nfsStringsFromList(ctx, data.AlsoIncludeNamingSchema, &diags)
+	opts.SourceDatasets = stringsFromList(ctx, data.SourceDatasets, &diags)
+	opts.Exclude = stringsFromList(ctx, data.Exclude, &diags)
+	opts.AlsoIncludeNamingSchema = stringsFromList(ctx, data.AlsoIncludeNamingSchema, &diags)
 
 	return opts, diags
 }
 
 // replicationScheduleFromModel converts the schedule block to the service type.
-// Unset attributes are sent as empty strings, which the API replaces with its
-// own defaults and reports back.
+// Attributes the practitioner left out carry the API's documented defaults from
+// the schema, so every field is known here.
 func replicationScheduleFromModel(block *ReplicationTaskScheduleModel) *services.ReplicationSchedule {
 	if block == nil {
 		return nil
 	}
 
 	return &services.ReplicationSchedule{
-		Minute: replicationCronField(block.Minute, "00"),
-		Hour:   replicationCronField(block.Hour, "*"),
-		Dom:    replicationCronField(block.Dom, "*"),
-		Month:  replicationCronField(block.Month, "*"),
-		Dow:    replicationCronField(block.Dow, "*"),
-		Begin:  replicationCronField(block.Begin, "00:00"),
-		End:    replicationCronField(block.End, "23:59"),
+		Minute: block.Minute.ValueString(),
+		Hour:   block.Hour.ValueString(),
+		Dom:    block.Dom.ValueString(),
+		Month:  block.Month.ValueString(),
+		Dow:    block.Dow.ValueString(),
+		Begin:  block.Begin.ValueString(),
+		End:    block.End.ValueString(),
 	}
-}
-
-// replicationCronField resolves one schedule attribute, substituting the API's
-// documented default when the practitioner left it out.
-func replicationCronField(v types.String, fallback string) string {
-	if v.IsNull() || v.IsUnknown() {
-		return fallback
-	}
-	return v.ValueString()
 }
 
 func (r *ReplicationTaskResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -541,6 +540,11 @@ func (r *ReplicationTaskResource) Read(ctx context.Context, req resource.ReadReq
 	if task == nil {
 		// Replication task was deleted outside Terraform
 		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	resp.Diagnostics.Append(validateReplicationTaskInScope(task)...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -622,29 +626,64 @@ func (r *ReplicationTaskResource) Delete(ctx context.Context, req resource.Delet
 	}
 }
 
+// validateReplicationTaskInScope refuses a task the resource does not manage,
+// so importing or reading a mode outside this resource's scope fails with an
+// explanation instead of producing state that the next plan would rewrite.
+// Membership is tested against the supported slices, so widening either one is
+// all a future direction or transport needs.
+func validateReplicationTaskInScope(task *services.ReplicationTask) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if !slices.Contains(replicationSupportedDirections, task.Direction) {
+		diags.AddError(
+			"Unsupported Replication Task Direction",
+			fmt.Sprintf(
+				"Replication task %d uses direction %q, which truenas_replication_task does not manage. "+
+					"This resource currently supports only the SSH push case; see the resource "+
+					"documentation for the modes that are out of scope.",
+				task.ID, task.Direction,
+			),
+		)
+	}
+
+	if !slices.Contains(replicationSupportedTransports, task.Transport) {
+		diags.AddError(
+			"Unsupported Replication Task Transport",
+			fmt.Sprintf(
+				"Replication task %d uses transport %q, which truenas_replication_task does not manage. "+
+					"This resource currently supports only the SSH push case; see the resource "+
+					"documentation for the modes that are out of scope.",
+				task.ID, task.Transport,
+			),
+		)
+	}
+
+	return diags
+}
+
 // mapReplicationTaskToModel maps a typed ReplicationTask to the resource model.
 func mapReplicationTaskToModel(task *services.ReplicationTask, data *ReplicationTaskResourceModel) {
 	data.ID = types.StringValue(strconv.FormatInt(task.ID, 10))
 	data.Name = types.StringValue(task.Name)
 	data.Direction = types.StringValue(task.Direction)
 	data.Transport = types.StringValue(task.Transport)
-	data.SSHCredentials = replicationInt64PointerValue(task.SSHCredentials)
+	data.SSHCredentials = int64PointerValue(task.SSHCredentials)
 	data.Sudo = types.BoolValue(task.Sudo)
-	data.SourceDatasets = nfsListFromStrings(task.SourceDatasets)
+	data.SourceDatasets = listFromStrings(task.SourceDatasets)
 	data.TargetDataset = types.StringValue(task.TargetDataset)
 	data.Recursive = types.BoolValue(task.Recursive)
-	data.Exclude = nfsListFromStrings(task.Exclude)
-	data.AlsoIncludeNamingSchema = nfsListFromStrings(task.AlsoIncludeNamingSchema)
+	data.Exclude = listFromStrings(task.Exclude)
+	data.AlsoIncludeNamingSchema = listFromStrings(task.AlsoIncludeNamingSchema)
 	data.Auto = types.BoolValue(task.Auto)
 	data.RetentionPolicy = types.StringValue(task.RetentionPolicy)
-	data.LifetimeValue = replicationInt64PointerValue(task.LifetimeValue)
-	data.LifetimeUnit = nfsStringPointerValue(task.LifetimeUnit)
+	data.LifetimeValue = int64PointerValue(task.LifetimeValue)
+	data.LifetimeUnit = stringPointerValue(task.LifetimeUnit)
 	data.Readonly = types.StringValue(task.Readonly)
 	data.AllowFromScratch = types.BoolValue(task.AllowFromScratch)
-	data.Compression = nfsStringPointerValue(task.Compression)
-	data.SpeedLimit = replicationInt64PointerValue(task.SpeedLimit)
+	data.Compression = stringPointerValue(task.Compression)
+	data.SpeedLimit = int64PointerValue(task.SpeedLimit)
 	data.Retries = types.Int64Value(task.Retries)
-	data.LoggingLevel = nfsStringPointerValue(task.LoggingLevel)
+	data.LoggingLevel = stringPointerValue(task.LoggingLevel)
 	data.Enabled = types.BoolValue(task.Enabled)
 	data.State = types.StringValue(task.State)
 
@@ -662,23 +701,4 @@ func mapReplicationTaskToModel(task *services.ReplicationTask, data *Replication
 		Begin:  types.StringValue(task.Schedule.Begin),
 		End:    types.StringValue(task.Schedule.End),
 	}
-}
-
-// replicationOptionalInt64 converts an optional int64 attribute to a pointer,
-// mapping null/unknown to nil so the API receives an explicit null.
-func replicationOptionalInt64(v types.Int64) *int64 {
-	if v.IsNull() || v.IsUnknown() {
-		return nil
-	}
-	n := v.ValueInt64()
-	return &n
-}
-
-// replicationInt64PointerValue converts an API int64 pointer back to an
-// attribute value.
-func replicationInt64PointerValue(p *int64) types.Int64 {
-	if p == nil {
-		return types.Int64Null()
-	}
-	return types.Int64Value(*p)
 }

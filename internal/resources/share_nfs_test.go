@@ -874,22 +874,22 @@ func TestMapShareNFSToModel_NullLocked(t *testing.T) {
 }
 
 func TestNFSOptionalString(t *testing.T) {
-	if got := nfsOptionalString(types.StringNull()); got != nil {
+	if got := optionalString(types.StringNull()); got != nil {
 		t.Errorf("expected nil for null, got %q", *got)
 	}
-	if got := nfsOptionalString(types.StringUnknown()); got != nil {
+	if got := optionalString(types.StringUnknown()); got != nil {
 		t.Errorf("expected nil for unknown, got %q", *got)
 	}
-	if got := nfsOptionalString(types.StringValue("nobody")); got == nil || *got != "nobody" {
+	if got := optionalString(types.StringValue("nobody")); got == nil || *got != "nobody" {
 		t.Errorf("expected 'nobody', got %v", got)
 	}
 }
 
 func TestNFSStringPointerValue(t *testing.T) {
-	if got := nfsStringPointerValue(nil); !got.IsNull() {
+	if got := stringPointerValue(nil); !got.IsNull() {
 		t.Error("expected null for nil pointer")
 	}
-	if got := nfsStringPointerValue(strPtr("root")); got.ValueString() != "root" {
+	if got := stringPointerValue(strPtr("root")); got.ValueString() != "root" {
 		t.Errorf("expected 'root', got %q", got.ValueString())
 	}
 }
@@ -898,15 +898,15 @@ func TestNFSStringsFromList(t *testing.T) {
 	ctx := context.Background()
 	var diags diag.Diagnostics
 
-	if got := nfsStringsFromList(ctx, types.ListNull(types.StringType), &diags); len(got) != 0 || got == nil {
+	if got := stringsFromList(ctx, types.ListNull(types.StringType), &diags); len(got) != 0 || got == nil {
 		t.Errorf("expected empty non-nil slice for null list, got %v", got)
 	}
-	if got := nfsStringsFromList(ctx, types.ListUnknown(types.StringType), &diags); len(got) != 0 || got == nil {
+	if got := stringsFromList(ctx, types.ListUnknown(types.StringType), &diags); len(got) != 0 || got == nil {
 		t.Errorf("expected empty non-nil slice for unknown list, got %v", got)
 	}
 
 	list, _ := types.ListValueFrom(ctx, types.StringType, []string{"a", "b"})
-	got := nfsStringsFromList(ctx, list, &diags)
+	got := stringsFromList(ctx, list, &diags)
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Errorf("unexpected slice: %v", got)
 	}
@@ -916,7 +916,7 @@ func TestNFSStringsFromList(t *testing.T) {
 }
 
 func TestNFSListFromStrings(t *testing.T) {
-	list := nfsListFromStrings([]string{"SYS", "KRB5"})
+	list := listFromStrings([]string{"SYS", "KRB5"})
 	if len(list.Elements()) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(list.Elements()))
 	}
@@ -924,7 +924,7 @@ func TestNFSListFromStrings(t *testing.T) {
 		t.Errorf("expected first element 'SYS', got %q", got)
 	}
 
-	empty := nfsListFromStrings([]string{})
+	empty := listFromStrings([]string{})
 	if empty.IsNull() || len(empty.Elements()) != 0 {
 		t.Errorf("expected empty list, got %v", empty)
 	}

@@ -84,6 +84,11 @@ today keeps working when the gaps are filled.
 | Failure handling | `hold_pending_snapshots` | Whether retention may delete source snapshots after a failed run. |
 | Actions | `replication.run`, `replication.run_onetime`, `replication.restore` | Running a task is an operation, not state Terraform can hold. Trigger runs from the UI, the CLI, or `midclt`. |
 
+Importing a task that uses one of the modes above is refused rather than silently
+adopted: reading a task whose `direction` or `transport` this resource does not manage
+fails with an error naming the offending value, so an out-of-scope task is never
+brought under management and then rewritten by the next apply.
+
 Fields the resource does not send are left at the server's defaults, and are not read
 back into state — changing one outside Terraform produces no diff.
 

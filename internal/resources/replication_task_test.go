@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/deevus/terraform-provider-truenas/internal/services"
@@ -453,42 +454,6 @@ func TestReplicationTaskResource_Create_WithoutSchedule(t *testing.T) {
 	}
 }
 
-// TestReplicationTaskResource_Create_ScheduleDefaults covers a schedule block
-// that only pins the fields the practitioner cares about: the rest are filled
-// with the API's documented defaults rather than sent as empty strings.
-func TestReplicationTaskResource_Create_ScheduleDefaults(t *testing.T) {
-	var capturedOpts services.CreateReplicationTaskOpts
-
-	r := newReplicationTaskResource(&services.MockReplicationService{
-		CreateFunc: func(ctx context.Context, opts services.CreateReplicationTaskOpts) (*services.ReplicationTask, error) {
-			capturedOpts = opts
-			return testReplicationTask(), nil
-		},
-	})
-
-	params := fullReplicationTaskParams()
-	params.Schedule = &replicationScheduleParams{Minute: "30", Hour: "2"}
-
-	schemaResp := getReplicationTaskResourceSchema(t)
-	resp := &resource.CreateResponse{State: tfsdk.State{Schema: schemaResp.Schema}}
-
-	r.Create(context.Background(), resource.CreateRequest{
-		Plan: tfsdk.Plan{Schema: schemaResp.Schema, Raw: createReplicationTaskModelValue(params)},
-	}, resp)
-
-	if resp.Diagnostics.HasError() {
-		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
-	}
-
-	want := services.ReplicationSchedule{
-		Minute: "30", Hour: "2", Dom: "*", Month: "*", Dow: "*",
-		Begin: "00:00", End: "23:59",
-	}
-	if capturedOpts.Schedule == nil || *capturedOpts.Schedule != want {
-		t.Errorf("expected schedule %+v, got %+v", want, capturedOpts.Schedule)
-	}
-}
-
 func TestReplicationTaskResource_Create_NullListsBecomeEmpty(t *testing.T) {
 	var capturedOpts services.CreateReplicationTaskOpts
 
@@ -619,6 +584,76 @@ func TestReplicationTaskResource_Read_Deleted(t *testing.T) {
 	}
 	if !resp.State.Raw.IsNull() {
 		t.Error("expected state to be removed")
+	}
+}
+
+// TestReplicationTaskResource_Read_UnsupportedMode covers reading — and so
+// importing — a task the resource does not manage: it is refused with an
+// explanation rather than adopted into state for the next apply to rewrite.
+func TestReplicationTaskResource_Read_UnsupportedMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*services.ReplicationTask)
+		summary string
+		value   string
+	}{
+		{
+			name:    "direction",
+			mutate:  func(task *services.ReplicationTask) { task.Direction = "PULL" },
+			summary: "Unsupported Replication Task Direction",
+			value:   "PULL",
+		},
+		{
+			name: "transport",
+			mutate: func(task *services.ReplicationTask) {
+				task.Transport = "LOCAL"
+				task.SSHCredentials = nil
+			},
+			summary: "Unsupported Replication Task Transport",
+			value:   "LOCAL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := testReplicationTask()
+			tt.mutate(task)
+
+			r := newReplicationTaskResource(&services.MockReplicationService{
+				GetFunc: func(ctx context.Context, id int64) (*services.ReplicationTask, error) {
+					return task, nil
+				},
+			})
+
+			params := fullReplicationTaskParams()
+			params.ID = "1"
+
+			schemaResp := getReplicationTaskResourceSchema(t)
+			state := tfsdk.State{Schema: schemaResp.Schema, Raw: createReplicationTaskModelValue(params)}
+			resp := &resource.ReadResponse{State: state}
+
+			r.Read(context.Background(), resource.ReadRequest{State: state}, resp)
+
+			if !resp.Diagnostics.HasError() {
+				t.Fatalf("expected an error for %s %q", tt.name, tt.value)
+			}
+
+			diagnostic := resp.Diagnostics.Errors()[0]
+			if diagnostic.Summary() != tt.summary {
+				t.Errorf("expected summary %q, got %q", tt.summary, diagnostic.Summary())
+			}
+			if !strings.Contains(diagnostic.Detail(), tt.value) ||
+				!strings.Contains(diagnostic.Detail(), "truenas_replication_task") {
+				t.Errorf("expected the detail to name the resource and %q, got %q", tt.value, diagnostic.Detail())
+			}
+
+			var data ReplicationTaskResourceModel
+			resp.State.Get(context.Background(), &data)
+			if data.Direction.ValueString() != "PUSH" || data.Transport.ValueString() != "SSH" {
+				t.Errorf("expected state to be left untouched, got %s/%s",
+					data.Direction.ValueString(), data.Transport.ValueString())
+			}
+		})
 	}
 }
 
