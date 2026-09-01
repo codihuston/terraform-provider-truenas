@@ -339,7 +339,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	builtinUsers, diags := r.builtinUsersID(ctx)
+	builtinUsers, diags := r.builtinUsersID(ctx, data.Groups)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -375,7 +375,7 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	builtinUsers, diags := r.builtinUsersID(ctx)
+	builtinUsers, diags := r.builtinUsersID(ctx, data.Groups)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -459,7 +459,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	builtinUsers, diags := r.builtinUsersID(ctx)
+	builtinUsers, diags := r.builtinUsersID(ctx, plan.Groups)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -569,8 +569,14 @@ func optionalStringValue(s string) types.String {
 
 // builtinUsersID resolves the builtin_users group, returning nil when the
 // server does not have one so reconciliation falls back to a plain comparison.
-func (r *UserResource) builtinUsersID(ctx context.Context) (*int64, diag.Diagnostics) {
+// The lookup is skipped unless there is a membership to reconcile against, so
+// an unset groups keeps user operations independent of group.query.
+func (r *UserResource) builtinUsersID(ctx context.Context, groups types.Set) (*int64, diag.Diagnostics) {
 	var diags diag.Diagnostics
+
+	if groups.IsNull() || groups.IsUnknown() {
+		return nil, diags
+	}
 
 	id, found, err := r.services.Group.BuiltinUsersID(ctx)
 	if err != nil {
@@ -606,20 +612,27 @@ func reconcileGroups(ctx context.Context, configured types.Set, groups []int64, 
 	return value
 }
 
-// sameGroups reports whether two memberships match, disregarding builtin_users.
-func sameGroups(a, b []int64, builtinUsers *int64) bool {
+// sameGroups reports whether the stored and reported memberships match. The
+// builtin_users exemption is one-directional: it excuses TrueNAS adding the
+// group, so it applies only to a group the server reports and the stored value
+// does not have. Losing a membership the stored value records is a real change
+// and surfaces like any other.
+func sameGroups(stored, reported []int64, builtinUsers *int64) bool {
 	set := func(ids []int64) map[int64]struct{} {
 		out := make(map[int64]struct{}, len(ids))
 		for _, id := range ids {
-			if builtinUsers != nil && id == *builtinUsers {
-				continue
-			}
 			out[id] = struct{}{}
 		}
 		return out
 	}
 
-	left, right := set(a), set(b)
+	left, right := set(stored), set(reported)
+	if builtinUsers != nil {
+		if _, ok := left[*builtinUsers]; !ok {
+			delete(right, *builtinUsers)
+		}
+	}
+
 	if len(left) != len(right) {
 		return false
 	}

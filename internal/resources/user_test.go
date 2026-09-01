@@ -641,6 +641,60 @@ func TestUserResource_Groups_UnsetTakesTheServerSet(t *testing.T) {
 	}
 }
 
+// readUserGroups runs a read against the supplied stored membership and returns
+// the groups left in state.
+func readUserGroups(t *testing.T, group *services.MockGroupService, stored tftypes.Value, reported []int64) types.Set {
+	t.Helper()
+
+	r := userResourceWithGroups(&services.MockUserService{
+		GetFunc: func(ctx context.Context, id int64) (*services.User, error) {
+			user := testUser()
+			user.Groups = reported
+			return user, nil
+		},
+	}, group)
+
+	s := resourceSchema(t, r)
+	state := objectValue(t, s, map[string]tftypes.Value{
+		"id":     tftypes.NewValue(tftypes.String, "71"),
+		"groups": stored,
+		"smb":    tftypes.NewValue(tftypes.Bool, true),
+	})
+
+	resp := &resource.ReadResponse{State: tfsdk.State{Schema: s, Raw: state}}
+	r.Read(context.Background(), resource.ReadRequest{State: tfsdk.State{Schema: s, Raw: state}}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	var result UserResourceModel
+	resp.State.Get(context.Background(), &result)
+
+	return result.Groups
+}
+
+func TestUserResource_Groups_BuiltinUsersRemovalSurfacesAsDrift(t *testing.T) {
+	calls := 0
+	// An unset groups stored the server's membership, builtin_users included;
+	// losing it out of band is a real change rather than an exempt addition.
+	groups := readUserGroups(t, builtinUsersGroupService(91, &calls), int64Set(110, 91), []int64{110})
+
+	if got := groupIDs(t, groups); len(got) != 1 || got[0] != 110 {
+		t.Errorf("expected the builtin_users removal to surface, got %v", got)
+	}
+}
+
+func TestUserResource_Groups_UnsetSkipsTheLookup(t *testing.T) {
+	calls := 0
+	unset := tftypes.NewValue(tftypes.Set{ElementType: tftypes.Number}, tftypes.UnknownValue)
+	createUserWithGroups(t, builtinUsersGroupService(91, &calls), unset, []int64{110, 91})
+
+	if calls != 0 {
+		t.Errorf("expected no builtin_users lookup for an unset groups, got %d", calls)
+	}
+}
+
 func TestUserResource_Groups_LookupErrorFailsTheOperation(t *testing.T) {
 	r := userResourceWithGroups(&services.MockUserService{
 		GetFunc: func(ctx context.Context, id int64) (*services.User, error) {
@@ -654,7 +708,8 @@ func TestUserResource_Groups_LookupErrorFailsTheOperation(t *testing.T) {
 
 	s := resourceSchema(t, r)
 	state := objectValue(t, s, map[string]tftypes.Value{
-		"id": tftypes.NewValue(tftypes.String, "71"),
+		"id":     tftypes.NewValue(tftypes.String, "71"),
+		"groups": int64Set(110),
 	})
 
 	resp := &resource.ReadResponse{State: tfsdk.State{Schema: s, Raw: state}}
