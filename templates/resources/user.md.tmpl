@@ -83,9 +83,13 @@ reports them.
 `group` and `groups` take group *entry IDs*, as exported by
 `truenas_group.<name>.id`, not Unix GIDs.
 
-Leave `groups` unset to let TrueNAS manage supplementary membership, which is
-what happens when `smb` adds the account to `builtin_users`. Set it to `[]` to
-remove all supplementary groups.
+TrueNAS adds SMB users to `builtin_users` itself. The provider ignores exactly
+that group when it reconciles `groups`, so enabling `smb` alongside an explicit
+`groups` neither fails the apply nor produces a diff. Every other membership
+change made outside Terraform is reported as drift.
+
+Leave `groups` unset to let TrueNAS manage supplementary membership entirely.
+Set it to `[]` to remove all supplementary groups.
 
 ## Import
 

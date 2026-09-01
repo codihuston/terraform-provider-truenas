@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	truenas "github.com/deevus/truenas-go"
 )
+
+// builtinUsersGroup is the group TrueNAS adds SMB users to on its own.
+const builtinUsersGroup = "builtin_users"
 
 // GroupResponse represents a group as returned by the group.* API.
 type GroupResponse struct {
@@ -52,6 +56,14 @@ type UpdateGroupOpts struct {
 // GroupService provides typed methods for the group.* API namespace.
 type GroupService struct {
 	client truenas.Caller
+
+	// builtinUsers caches the builtin_users lookup. The service is built once
+	// per provider run while resources apply in parallel, so the cache is
+	// guarded.
+	builtinUsersMu     sync.Mutex
+	builtinUsersID     int64
+	builtinUsersFound  bool
+	builtinUsersCached bool
 }
 
 // NewGroupService creates a new GroupService.
@@ -133,6 +145,39 @@ func (s *GroupService) getCreated(ctx context.Context, id int64) (*Group, error)
 	}
 
 	return group, nil
+}
+
+// BuiltinUsersID returns the entry ID of the builtin_users group. The second
+// result reports whether the group exists, so a server without it is handled by
+// the caller rather than failing the operation. The lookup is by name so no ID
+// is hardcoded, and the result is cached for the life of the service.
+func (s *GroupService) BuiltinUsersID(ctx context.Context) (int64, bool, error) {
+	s.builtinUsersMu.Lock()
+	defer s.builtinUsersMu.Unlock()
+
+	if s.builtinUsersCached {
+		return s.builtinUsersID, s.builtinUsersFound, nil
+	}
+
+	result, err := s.client.Call(ctx, "group.query", []any{
+		[]any{[]any{"name", "=", builtinUsersGroup}},
+	})
+	if err != nil {
+		return 0, false, err
+	}
+
+	var groups []GroupResponse
+	if err := json.Unmarshal(result, &groups); err != nil {
+		return 0, false, fmt.Errorf("parse query response: %w", err)
+	}
+
+	if len(groups) > 0 {
+		s.builtinUsersID = groups[0].ID
+		s.builtinUsersFound = true
+	}
+	s.builtinUsersCached = true
+
+	return s.builtinUsersID, s.builtinUsersFound, nil
 }
 
 // Delete deletes a group by ID. Members keep their accounts; only users whose

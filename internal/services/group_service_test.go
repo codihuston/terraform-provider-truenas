@@ -226,6 +226,57 @@ func TestGroupService_Delete_Error(t *testing.T) {
 	}
 }
 
+func TestGroupService_BuiltinUsersID(t *testing.T) {
+	caller := &recordingCaller{response: `[{"id": 91, "name": "builtin_users", "gid": 545}]`}
+	service := NewGroupService(caller)
+
+	id, found, err := service.BuiltinUsersID(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found || id != 91 {
+		t.Errorf("expected builtin_users 91, got %d (found %v)", id, found)
+	}
+	if caller.call(t, 0).method != "group.query" {
+		t.Errorf("expected method 'group.query', got %q", caller.call(t, 0).method)
+	}
+
+	if _, _, err := service.BuiltinUsersID(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(caller.calls) != 1 {
+		t.Errorf("expected the lookup to be cached, got %d calls", len(caller.calls))
+	}
+}
+
+func TestGroupService_BuiltinUsersID_Missing(t *testing.T) {
+	caller := &recordingCaller{response: `[]`}
+
+	id, found, err := NewGroupService(caller).BuiltinUsersID(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found || id != 0 {
+		t.Errorf("expected no builtin_users group, got %d (found %v)", id, found)
+	}
+}
+
+func TestGroupService_BuiltinUsersID_Error(t *testing.T) {
+	caller := &recordingCaller{err: errors.New("connection refused")}
+
+	if _, _, err := NewGroupService(caller).BuiltinUsersID(context.Background()); err == nil {
+		t.Fatal("expected an error to surface")
+	}
+}
+
+func TestGroupService_BuiltinUsersID_InvalidResponse(t *testing.T) {
+	caller := &recordingCaller{response: `not json`}
+
+	if _, _, err := NewGroupService(caller).BuiltinUsersID(context.Background()); err == nil {
+		t.Fatal("expected a parse error")
+	}
+}
+
 func TestMockGroupService_Defaults(t *testing.T) {
 	var api GroupServiceAPI = &MockGroupService{}
 	ctx := context.Background()
@@ -242,6 +293,9 @@ func TestMockGroupService_Defaults(t *testing.T) {
 	if err := api.Delete(ctx, 1); err != nil {
 		t.Errorf("expected nil from Delete, got %v", err)
 	}
+	if id, found, err := api.BuiltinUsersID(ctx); id != 0 || found || err != nil {
+		t.Errorf("expected 0, false, nil from BuiltinUsersID, got %d, %v, %v", id, found, err)
+	}
 }
 
 func TestMockGroupService_Delegates(t *testing.T) {
@@ -251,6 +305,9 @@ func TestMockGroupService_Delegates(t *testing.T) {
 		GetFunc:    func(ctx context.Context, id int64) (*Group, error) { return want, nil },
 		UpdateFunc: func(ctx context.Context, id int64, opts UpdateGroupOpts) (*Group, error) { return want, nil },
 		DeleteFunc: func(ctx context.Context, id int64) error { return errors.New("boom") },
+		BuiltinUsersIDFunc: func(ctx context.Context) (int64, bool, error) {
+			return 91, true, nil
+		},
 	}
 	ctx := context.Background()
 
@@ -265,5 +322,8 @@ func TestMockGroupService_Delegates(t *testing.T) {
 	}
 	if err := api.Delete(ctx, 110); err == nil {
 		t.Error("expected Delete to delegate to DeleteFunc")
+	}
+	if id, found, _ := api.BuiltinUsersID(ctx); id != 91 || !found {
+		t.Error("expected BuiltinUsersID to delegate to BuiltinUsersIDFunc")
 	}
 }

@@ -120,9 +120,13 @@ reports them.
 `group` and `groups` take group *entry IDs*, as exported by
 `truenas_group.<name>.id`, not Unix GIDs.
 
-Leave `groups` unset to let TrueNAS manage supplementary membership, which is
-what happens when `smb` adds the account to `builtin_users`. Set it to `[]` to
-remove all supplementary groups.
+TrueNAS adds SMB users to `builtin_users` itself. The provider ignores exactly
+that group when it reconciles `groups`, so enabling `smb` alongside an explicit
+`groups` neither fails the apply nor produces a diff. Every other membership
+change made outside Terraform is reported as drift.
+
+Leave `groups` unset to let TrueNAS manage supplementary membership entirely.
+Set it to `[]` to remove all supplementary groups.
 
 ## Import
 
@@ -148,7 +152,7 @@ terraform import truenas_user.deploy 71
 - `email` (String) Email address for the account. Accounts with the `FULL_ADMIN` role receive alerts and notifications at this address.
 - `group` (Number) Entry ID of the primary group, as exported by `truenas_group.<name>.id`. This is the group entry ID, not the Unix GID. Required unless `group_create` is set.
 - `group_create` (Boolean) Create a new group named after the user and use it as the primary group. Only honoured when the user is created; TrueNAS rejects it on update.
-- `groups` (Set of Number) Entry IDs of additional groups the user belongs to. Leave unset to let TrueNAS manage membership, which is what happens when `smb` is enabled and the user is added to `builtin_users`. Set to `[]` to remove all additional groups.
+- `groups` (Set of Number) Entry IDs of additional groups the user belongs to. TrueNAS adds SMB users to `builtin_users` itself, and that group alone is ignored when this attribute is reconciled; every other membership change made outside Terraform is reported as drift. Leave unset to let TrueNAS manage membership entirely, or set to `[]` to remove all additional groups.
 - `home` (String) Home directory to assign to the user. When `home_create` is set this is the parent directory and TrueNAS creates the home at `<home>/<username>`; the resulting path is exported as `home_path`.
 - `home_create` (Boolean) Create the home directory under `home`. Only sent when `home` changes, so repeated applies do not move or nest the existing home.
 - `home_mode` (String) Octal permissions applied to the home directory. TrueNAS does not report this back, so changes made outside Terraform are not detected.

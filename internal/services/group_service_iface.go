@@ -8,6 +8,7 @@ type GroupServiceAPI interface {
 	Get(ctx context.Context, id int64) (*Group, error)
 	Update(ctx context.Context, id int64, opts UpdateGroupOpts) (*Group, error)
 	Delete(ctx context.Context, id int64) error
+	BuiltinUsersID(ctx context.Context) (int64, bool, error)
 }
 
 // Compile-time checks.
@@ -16,10 +17,11 @@ var _ GroupServiceAPI = (*MockGroupService)(nil)
 
 // MockGroupService is a test double for GroupServiceAPI.
 type MockGroupService struct {
-	CreateFunc func(ctx context.Context, opts CreateGroupOpts) (*Group, error)
-	GetFunc    func(ctx context.Context, id int64) (*Group, error)
-	UpdateFunc func(ctx context.Context, id int64, opts UpdateGroupOpts) (*Group, error)
-	DeleteFunc func(ctx context.Context, id int64) error
+	CreateFunc         func(ctx context.Context, opts CreateGroupOpts) (*Group, error)
+	GetFunc            func(ctx context.Context, id int64) (*Group, error)
+	UpdateFunc         func(ctx context.Context, id int64, opts UpdateGroupOpts) (*Group, error)
+	DeleteFunc         func(ctx context.Context, id int64) error
+	BuiltinUsersIDFunc func(ctx context.Context) (int64, bool, error)
 }
 
 func (m *MockGroupService) Create(ctx context.Context, opts CreateGroupOpts) (*Group, error) {
@@ -48,4 +50,11 @@ func (m *MockGroupService) Delete(ctx context.Context, id int64) error {
 		return m.DeleteFunc(ctx, id)
 	}
 	return nil
+}
+
+func (m *MockGroupService) BuiltinUsersID(ctx context.Context) (int64, bool, error) {
+	if m.BuiltinUsersIDFunc != nil {
+		return m.BuiltinUsersIDFunc(ctx)
+	}
+	return 0, false, nil
 }

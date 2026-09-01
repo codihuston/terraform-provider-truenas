@@ -3,11 +3,13 @@ package resources
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/deevus/terraform-provider-truenas/internal/services"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -29,10 +31,27 @@ func testUser() *services.User {
 	}
 }
 
-// userResource builds a user resource backed by the supplied mock service.
+// userResource builds a user resource backed by the supplied mock service and a
+// group service that reports no builtin_users group.
 func userResource(mock *services.MockUserService) *UserResource {
+	return userResourceWithGroups(mock, &services.MockGroupService{})
+}
+
+// userResourceWithGroups builds a user resource backed by both mock services.
+func userResourceWithGroups(user *services.MockUserService, group *services.MockGroupService) *UserResource {
 	return &UserResource{
-		BaseResource: BaseResource{services: &services.TrueNASServices{User: mock}},
+		BaseResource: BaseResource{services: &services.TrueNASServices{User: user, Group: group}},
+	}
+}
+
+// builtinUsersGroupService reports builtin_users as the supplied entry ID and
+// counts how often the lookup reaches the API.
+func builtinUsersGroupService(id int64, calls *int) *services.MockGroupService {
+	return &services.MockGroupService{
+		BuiltinUsersIDFunc: func(ctx context.Context) (int64, bool, error) {
+			*calls++
+			return id, true, nil
+		},
 	}
 }
 
@@ -525,6 +544,124 @@ func TestUserResource_Update_HomeFollowsTheServerUntilHomeChanges(t *testing.T) 
 	}
 	if relocated.Home != "/mnt/tank/staff" {
 		t.Errorf("expected home '/mnt/tank/staff', got %q", relocated.Home)
+	}
+}
+
+// createUserWithGroups runs a create whose API response carries the supplied
+// group membership, and returns the groups left in state.
+func createUserWithGroups(t *testing.T, group *services.MockGroupService, configured tftypes.Value, reported []int64) types.Set {
+	t.Helper()
+
+	r := userResourceWithGroups(&services.MockUserService{
+		CreateFunc: func(ctx context.Context, opts services.CreateUserOpts) (*services.User, error) {
+			user := testUser()
+			user.Groups = reported
+			return user, nil
+		},
+	}, group)
+
+	s := resourceSchema(t, r)
+	attrs := withAttrs(keyOnlyUserAttrs(), map[string]tftypes.Value{
+		"group":  tftypes.NewValue(tftypes.Number, 110),
+		"groups": configured,
+		"smb":    tftypes.NewValue(tftypes.Bool, true),
+	})
+	value := objectValue(t, s, attrs)
+
+	resp := &resource.CreateResponse{State: tfsdk.State{Schema: s}}
+	r.Create(context.Background(), resource.CreateRequest{
+		Plan:   tfsdk.Plan{Schema: s, Raw: value},
+		Config: tfsdk.Config{Schema: s, Raw: value},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	var result UserResourceModel
+	resp.State.Get(context.Background(), &result)
+
+	return result.Groups
+}
+
+// groupIDs converts a groups attribute to a sorted slice for comparison.
+func groupIDs(t *testing.T, set types.Set) []int64 {
+	t.Helper()
+
+	var ids []int64
+	if diags := set.ElementsAs(context.Background(), &ids, false); diags.HasError() {
+		t.Fatalf("unexpected errors: %v", diags)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	return ids
+}
+
+func TestUserResource_Groups_BuiltinUsersIsNotDrift(t *testing.T) {
+	calls := 0
+	// TrueNAS adds SMB users to builtin_users itself, which must not change the
+	// configured membership.
+	groups := createUserWithGroups(t, builtinUsersGroupService(91, &calls), int64Set(110), []int64{110, 91})
+
+	if got := groupIDs(t, groups); len(got) != 1 || got[0] != 110 {
+		t.Errorf("expected the configured groups to be preserved, got %v", got)
+	}
+	if calls != 1 {
+		t.Errorf("expected one builtin_users lookup, got %d", calls)
+	}
+}
+
+func TestUserResource_Groups_OtherAdditionSurfacesAsDrift(t *testing.T) {
+	calls := 0
+	groups := createUserWithGroups(t, builtinUsersGroupService(91, &calls), int64Set(110), []int64{110, 120})
+
+	got := groupIDs(t, groups)
+	if len(got) != 2 || got[0] != 110 || got[1] != 120 {
+		t.Errorf("expected the server's membership to surface, got %v", got)
+	}
+}
+
+func TestUserResource_Groups_RemovalSurfacesAsDrift(t *testing.T) {
+	calls := 0
+	groups := createUserWithGroups(t, builtinUsersGroupService(91, &calls), int64Set(110, 120), []int64{110})
+
+	if got := groupIDs(t, groups); len(got) != 1 || got[0] != 110 {
+		t.Errorf("expected the server's membership to surface, got %v", got)
+	}
+}
+
+func TestUserResource_Groups_UnsetTakesTheServerSet(t *testing.T) {
+	calls := 0
+	unset := tftypes.NewValue(tftypes.Set{ElementType: tftypes.Number}, tftypes.UnknownValue)
+	groups := createUserWithGroups(t, builtinUsersGroupService(91, &calls), unset, []int64{110, 91})
+
+	got := groupIDs(t, groups)
+	if len(got) != 2 || got[0] != 91 || got[1] != 110 {
+		t.Errorf("expected the server's membership verbatim, got %v", got)
+	}
+}
+
+func TestUserResource_Groups_LookupErrorFailsTheOperation(t *testing.T) {
+	r := userResourceWithGroups(&services.MockUserService{
+		GetFunc: func(ctx context.Context, id int64) (*services.User, error) {
+			return testUser(), nil
+		},
+	}, &services.MockGroupService{
+		BuiltinUsersIDFunc: func(ctx context.Context) (int64, bool, error) {
+			return 0, false, errors.New("connection refused")
+		},
+	})
+
+	s := resourceSchema(t, r)
+	state := objectValue(t, s, map[string]tftypes.Value{
+		"id": tftypes.NewValue(tftypes.String, "71"),
+	})
+
+	resp := &resource.ReadResponse{State: tfsdk.State{Schema: s, Raw: state}}
+	r.Read(context.Background(), resource.ReadRequest{State: tfsdk.State{Schema: s, Raw: state}}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected error for a failed builtin_users lookup")
 	}
 }
 

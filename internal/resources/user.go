@@ -115,9 +115,11 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Default:  booldefault.StaticBool(false),
 			},
 			"groups": schema.SetAttribute{
-				Description: "Entry IDs of additional groups the user belongs to. Leave unset to let " +
-					"TrueNAS manage membership, which is what happens when `smb` is enabled and the " +
-					"user is added to `builtin_users`. Set to `[]` to remove all additional groups.",
+				Description: "Entry IDs of additional groups the user belongs to. TrueNAS adds SMB " +
+					"users to `builtin_users` itself, and that group alone is ignored when this " +
+					"attribute is reconciled; every other membership change made outside Terraform " +
+					"is reported as drift. Leave unset to let TrueNAS manage membership entirely, " +
+					"or set to `[]` to remove all additional groups.",
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.Int64Type,
@@ -337,6 +339,12 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
+	builtinUsers, diags := r.builtinUsersID(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	user, err := r.services.User.Create(ctx, opts)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -346,7 +354,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	resp.Diagnostics.Append(mapUserToModel(ctx, user, &data)...)
+	resp.Diagnostics.Append(mapUserToModel(ctx, user, &data, builtinUsers)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -367,6 +375,12 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
+	builtinUsers, diags := r.builtinUsersID(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	user, err := r.services.User.Get(ctx, id)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -382,7 +396,7 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	resp.Diagnostics.Append(mapUserToModel(ctx, user, &data)...)
+	resp.Diagnostics.Append(mapUserToModel(ctx, user, &data, builtinUsers)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -445,6 +459,12 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
+	builtinUsers, diags := r.builtinUsersID(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	user, err := r.services.User.Update(ctx, id, opts)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -454,7 +474,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	resp.Diagnostics.Append(mapUserToModel(ctx, user, &plan)...)
+	resp.Diagnostics.Append(mapUserToModel(ctx, user, &plan, builtinUsers)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -488,7 +508,7 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 // home, home_create and home_mode are inputs TrueNAS does not report back and
 // are left as configured. home_path carries the directory the server actually
 // assigned, which differs from home whenever home_create was used.
-func mapUserToModel(ctx context.Context, user *services.User, data *UserResourceModel) diag.Diagnostics {
+func mapUserToModel(ctx context.Context, user *services.User, data *UserResourceModel, builtinUsers *int64) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	// An import has no configured home to preserve, so seed it from the
@@ -513,9 +533,7 @@ func mapUserToModel(ctx context.Context, user *services.User, data *UserResource
 	data.Email = normalizedStringValue(data.Email, user.Email)
 	data.SSHPublicKey = normalizedStringValue(data.SSHPublicKey, user.SSHPublicKey)
 
-	groups, d := types.SetValueFrom(ctx, types.Int64Type, user.Groups)
-	diags.Append(d...)
-	data.Groups = groups
+	data.Groups = reconcileGroups(ctx, data.Groups, user.Groups, builtinUsers, &diags)
 
 	sudoCommands, d := types.ListValueFrom(ctx, types.StringType, user.SudoCommands)
 	diags.Append(d...)
@@ -547,6 +565,71 @@ func optionalStringValue(s string) types.String {
 	}
 
 	return types.StringValue(s)
+}
+
+// builtinUsersID resolves the builtin_users group, returning nil when the
+// server does not have one so reconciliation falls back to a plain comparison.
+func (r *UserResource) builtinUsersID(ctx context.Context) (*int64, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	id, found, err := r.services.Group.BuiltinUsersID(ctx)
+	if err != nil {
+		diags.AddError(
+			"Unable to Read Groups",
+			fmt.Sprintf("Unable to query the builtin_users group: %s", err.Error()),
+		)
+		return nil, diags
+	}
+	if !found {
+		return nil, diags
+	}
+
+	return &id, diags
+}
+
+// reconcileGroups keeps a configured membership when the server's set differs
+// from it only by builtin_users. Computed relaxes Terraform's final == planned
+// check only while the planned value is unknown, so an explicitly configured
+// groups is known, and TrueNAS adding an SMB user to builtin_users on its own
+// would otherwise abort the apply with "Provider produced inconsistent result
+// after apply". Only that group is excused: every other difference is taken
+// from the server so an out-of-band membership change surfaces as drift.
+func reconcileGroups(ctx context.Context, configured types.Set, groups []int64, builtinUsers *int64, diags *diag.Diagnostics) types.Set {
+	if !configured.IsNull() && !configured.IsUnknown() &&
+		sameGroups(int64SetValues(ctx, configured, diags), groups, builtinUsers) {
+		return configured
+	}
+
+	value, d := types.SetValueFrom(ctx, types.Int64Type, groups)
+	diags.Append(d...)
+
+	return value
+}
+
+// sameGroups reports whether two memberships match, disregarding builtin_users.
+func sameGroups(a, b []int64, builtinUsers *int64) bool {
+	set := func(ids []int64) map[int64]struct{} {
+		out := make(map[int64]struct{}, len(ids))
+		for _, id := range ids {
+			if builtinUsers != nil && id == *builtinUsers {
+				continue
+			}
+			out[id] = struct{}{}
+		}
+		return out
+	}
+
+	left, right := set(a), set(b)
+	if len(left) != len(right) {
+		return false
+	}
+	for id := range left {
+		if _, ok := right[id]; !ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 // normalizedStringValue keeps the configured value when the server returns an
