@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/deevus/terraform-provider-truenas/internal/services"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -158,13 +159,11 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Description: "Email address for the account. Accounts with the `FULL_ADMIN` role receive " +
 					"alerts and notifications at this address.",
 				Optional: true,
-				Computed: true,
 			},
 			"ssh_public_key": schema.StringAttribute{
 				Description: "SSH public keys authorised for this account. TrueNAS writes these to the " +
 					"user's home directory, so `home` must point at a writable path.",
 				Optional: true,
-				Computed: true,
 			},
 			"ssh_password_enabled": schema.BoolAttribute{
 				Description: "Allow SSH password authentication. Leave disabled and use `ssh_public_key` " +
@@ -511,8 +510,8 @@ func mapUserToModel(ctx context.Context, user *services.User, data *UserResource
 	data.PasswordDisabled = types.BoolValue(user.PasswordDisabled)
 	data.SSHPasswordEnabled = types.BoolValue(user.SSHPasswordEnabled)
 	data.Builtin = types.BoolValue(user.Builtin)
-	data.Email = optionalStringValue(user.Email)
-	data.SSHPublicKey = optionalStringValue(user.SSHPublicKey)
+	data.Email = normalizedStringValue(data.Email, user.Email)
+	data.SSHPublicKey = normalizedStringValue(data.SSHPublicKey, user.SSHPublicKey)
 
 	groups, d := types.SetValueFrom(ctx, types.Int64Type, user.Groups)
 	diags.Append(d...)
@@ -548,6 +547,22 @@ func optionalStringValue(s string) types.String {
 	}
 
 	return types.StringValue(s)
+}
+
+// normalizedStringValue keeps the configured value when the server returns an
+// equivalent one. TrueNAS trims sshpubkey whitespace, and these attributes are
+// optional rather than computed, so the post-apply state has to equal the
+// configuration exactly or Terraform aborts with "Provider produced
+// inconsistent result after apply" — the shipped example feeds
+// `file("deploy.pub")`, which ends in a newline. A materially different value
+// still replaces the stored one, so out-of-band drift surfaces on read.
+func normalizedStringValue(configured types.String, s string) types.String {
+	if !configured.IsNull() && !configured.IsUnknown() &&
+		strings.TrimSpace(configured.ValueString()) == strings.TrimSpace(s) {
+		return configured
+	}
+
+	return optionalStringValue(s)
 }
 
 // int64SetValues converts a set attribute to a Go slice, treating null and

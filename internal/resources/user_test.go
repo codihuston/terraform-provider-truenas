@@ -528,6 +528,77 @@ func TestUserResource_Update_HomeFollowsTheServerUntilHomeChanges(t *testing.T) 
 	}
 }
 
+func TestUserResource_Update_SSHPublicKeyWhitespaceIsNotDrift(t *testing.T) {
+	settled := withAttrs(keyOnlyUserAttrs(), map[string]tftypes.Value{
+		"id":     tftypes.NewValue(tftypes.String, "71"),
+		"uid":    tftypes.NewValue(tftypes.Number, 3000),
+		"group":  tftypes.NewValue(tftypes.Number, 110),
+		"groups": int64Set(91),
+		// file() supplies a trailing newline that TrueNAS strips on the way in.
+		"ssh_public_key": tftypes.NewValue(tftypes.String, "ssh-ed25519 AAAA deploy@example\n"),
+	})
+
+	_, resp := updateUser(t, settled, settled, settled)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	var result UserResourceModel
+	resp.State.Get(context.Background(), &result)
+	if result.SSHPublicKey.ValueString() != "ssh-ed25519 AAAA deploy@example\n" {
+		t.Errorf("expected the configured key to be preserved, got %q", result.SSHPublicKey.ValueString())
+	}
+}
+
+func TestUserResource_Update_SSHPublicKeyIsRevocable(t *testing.T) {
+	settled := withAttrs(keyOnlyUserAttrs(), map[string]tftypes.Value{
+		"id":     tftypes.NewValue(tftypes.String, "71"),
+		"uid":    tftypes.NewValue(tftypes.Number, 3000),
+		"group":  tftypes.NewValue(tftypes.Number, 110),
+		"groups": int64Set(91),
+	})
+	cleared := withAttrs(settled, map[string]tftypes.Value{
+		"ssh_public_key": tftypes.NewValue(tftypes.String, nil),
+	})
+
+	captured, resp := updateUser(t, settled, cleared, cleared)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+	if captured.SSHPublicKey != nil {
+		t.Errorf("expected the key to be revoked, got %q", *captured.SSHPublicKey)
+	}
+}
+
+func TestUserResource_Read_SSHPublicKeyDrift(t *testing.T) {
+	r := userResource(&services.MockUserService{
+		GetFunc: func(ctx context.Context, id int64) (*services.User, error) {
+			user := testUser()
+			user.SSHPublicKey = "ssh-ed25519 BBBB intruder@example"
+			return user, nil
+		},
+	})
+
+	s := resourceSchema(t, r)
+	state := objectValue(t, s, map[string]tftypes.Value{
+		"id":             tftypes.NewValue(tftypes.String, "71"),
+		"ssh_public_key": tftypes.NewValue(tftypes.String, "ssh-ed25519 AAAA deploy@example"),
+	})
+
+	resp := &resource.ReadResponse{State: tfsdk.State{Schema: s, Raw: state}}
+	r.Read(context.Background(), resource.ReadRequest{State: tfsdk.State{Schema: s, Raw: state}}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	var result UserResourceModel
+	resp.State.Get(context.Background(), &result)
+	if result.SSHPublicKey.ValueString() != "ssh-ed25519 BBBB intruder@example" {
+		t.Errorf("expected the server's key to surface as drift, got %q", result.SSHPublicKey.ValueString())
+	}
+}
+
 func TestUserResource_Update_PasswordFollowsVersion(t *testing.T) {
 	settled := withAttrs(keyOnlyUserAttrs(), map[string]tftypes.Value{
 		"id":                  tftypes.NewValue(tftypes.String, "71"),
