@@ -555,6 +555,9 @@ func TestReplicationTaskResource_Read_Success(t *testing.T) {
 	if capturedID != 1 {
 		t.Errorf("expected ID 1, got %d", capturedID)
 	}
+	if len(resp.Diagnostics) != 0 {
+		t.Errorf("expected no diagnostics reading a PUSH/SSH task, got %v", resp.Diagnostics)
+	}
 
 	var data ReplicationTaskResourceModel
 	resp.State.Get(context.Background(), &data)
@@ -579,17 +582,18 @@ func TestReplicationTaskResource_Read_Deleted(t *testing.T) {
 		State: tfsdk.State{Schema: schemaResp.Schema, Raw: createReplicationTaskModelValue(params)},
 	}, resp)
 
-	if resp.Diagnostics.HasError() {
-		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	if len(resp.Diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics for a task deleted outside Terraform, got %v", resp.Diagnostics)
 	}
 	if !resp.State.Raw.IsNull() {
 		t.Error("expected state to be removed")
 	}
 }
 
-// TestReplicationTaskResource_Read_UnsupportedMode covers reading — and so
-// importing — a task the resource does not manage: it is refused with an
-// explanation rather than adopted into state for the next apply to rewrite.
+// TestReplicationTaskResource_Read_UnsupportedMode covers a managed task that
+// was flipped out of scope on the server: the refresh warns and keeps the task
+// in state, so it can still be planned and destroyed. Import is refused
+// instead; see TestReplicationTaskResource_Import_UnsupportedMode.
 func TestReplicationTaskResource_Read_UnsupportedMode(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -634,11 +638,14 @@ func TestReplicationTaskResource_Read_UnsupportedMode(t *testing.T) {
 
 			r.Read(context.Background(), resource.ReadRequest{State: state}, resp)
 
-			if !resp.Diagnostics.HasError() {
-				t.Fatalf("expected an error for %s %q", tt.name, tt.value)
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("expected a warning rather than an error: %v", resp.Diagnostics)
+			}
+			if resp.Diagnostics.WarningsCount() != 1 {
+				t.Fatalf("expected exactly 1 warning, got %v", resp.Diagnostics)
 			}
 
-			diagnostic := resp.Diagnostics.Errors()[0]
+			diagnostic := resp.Diagnostics.Warnings()[0]
 			if diagnostic.Summary() != tt.summary {
 				t.Errorf("expected summary %q, got %q", tt.summary, diagnostic.Summary())
 			}
@@ -646,11 +653,18 @@ func TestReplicationTaskResource_Read_UnsupportedMode(t *testing.T) {
 				!strings.Contains(diagnostic.Detail(), "truenas_replication_task") {
 				t.Errorf("expected the detail to name the resource and %q, got %q", tt.value, diagnostic.Detail())
 			}
+			if !strings.Contains(diagnostic.Detail(), "destroyed") {
+				t.Errorf("expected the detail to explain the task is kept in state, got %q", diagnostic.Detail())
+			}
+
+			if resp.State.Raw.IsNull() {
+				t.Fatal("expected the task to stay in state")
+			}
 
 			var data ReplicationTaskResourceModel
 			resp.State.Get(context.Background(), &data)
-			if data.Direction.ValueString() != "PUSH" || data.Transport.ValueString() != "SSH" {
-				t.Errorf("expected state to be left untouched, got %s/%s",
+			if data.Direction.ValueString() != task.Direction || data.Transport.ValueString() != task.Transport {
+				t.Errorf("expected the server values in state, got %s/%s",
 					data.Direction.ValueString(), data.Transport.ValueString())
 			}
 		})

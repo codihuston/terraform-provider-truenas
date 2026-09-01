@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"strings"
+
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	providerschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -19,7 +21,9 @@ import (
 // replicationTestProvider exposes just the replication task resource, so the
 // framework's own plan machinery — schema defaults included — can be driven
 // from a unit test.
-type replicationTestProvider struct{}
+type replicationTestProvider struct {
+	services *services.TrueNASServices
+}
 
 func (p *replicationTestProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "truenas"
@@ -29,7 +33,8 @@ func (p *replicationTestProvider) Schema(_ context.Context, _ provider.SchemaReq
 	resp.Schema = providerschema.Schema{}
 }
 
-func (p *replicationTestProvider) Configure(_ context.Context, _ provider.ConfigureRequest, _ *provider.ConfigureResponse) {
+func (p *replicationTestProvider) Configure(_ context.Context, _ provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+	resp.ResourceData = p.services
 }
 
 func (p *replicationTestProvider) Resources(_ context.Context) []func() resource.Resource {
@@ -230,5 +235,209 @@ func TestReplicationTaskResource_Plan_WithoutSchedule(t *testing.T) {
 
 	if schedule := plannedReplicationSchedule(t, planned); schedule != nil {
 		t.Fatalf("expected an omitted schedule block to stay null, got %+v", schedule)
+	}
+}
+
+// replicationTaskServer returns a configured provider server backed by mock, so
+// import and refresh can be driven through the framework's real RPC paths.
+func replicationTaskServer(t *testing.T, mock *services.MockReplicationService) tfprotov6.ProviderServer {
+	t.Helper()
+
+	ctx := context.Background()
+	server := providerserver.NewProtocol6(&replicationTestProvider{
+		services: &services.TrueNASServices{Replication: mock},
+	})()
+
+	schemaResp, err := server.GetProviderSchema(ctx, &tfprotov6.GetProviderSchemaRequest{})
+	if err != nil {
+		t.Fatalf("GetProviderSchema: %s", err)
+	}
+
+	providerType := schemaResp.Provider.ValueType()
+	config, err := tfprotov6.NewDynamicValue(providerType, tftypes.NewValue(providerType, map[string]tftypes.Value{}))
+	if err != nil {
+		t.Fatalf("NewDynamicValue: %s", err)
+	}
+
+	configureResp, err := server.ConfigureProvider(ctx, &tfprotov6.ConfigureProviderRequest{Config: &config})
+	if err != nil {
+		t.Fatalf("ConfigureProvider: %s", err)
+	}
+	assertNoErrorDiagnostics(t, configureResp.Diagnostics)
+
+	return server
+}
+
+func assertNoErrorDiagnostics(t *testing.T, diagnostics []*tfprotov6.Diagnostic) {
+	t.Helper()
+
+	for _, d := range diagnostics {
+		if d.Severity == tfprotov6.DiagnosticSeverityError {
+			t.Fatalf("unexpected error diagnostic: %s: %s", d.Summary, d.Detail)
+		}
+	}
+}
+
+// importReplicationTask runs ImportResourceState followed by the ReadResource
+// the framework performs next, which is where the task actually arrives.
+func importReplicationTask(t *testing.T, server tfprotov6.ProviderServer, id string) *tfprotov6.ReadResourceResponse {
+	t.Helper()
+
+	ctx := context.Background()
+
+	importResp, err := server.ImportResourceState(ctx, &tfprotov6.ImportResourceStateRequest{
+		TypeName: "truenas_replication_task",
+		ID:       id,
+	})
+	if err != nil {
+		t.Fatalf("ImportResourceState: %s", err)
+	}
+	assertNoErrorDiagnostics(t, importResp.Diagnostics)
+
+	if len(importResp.ImportedResources) != 1 {
+		t.Fatalf("expected 1 imported resource, got %d", len(importResp.ImportedResources))
+	}
+
+	imported := importResp.ImportedResources[0]
+
+	readResp, err := server.ReadResource(ctx, &tfprotov6.ReadResourceRequest{
+		TypeName:     "truenas_replication_task",
+		CurrentState: imported.State,
+		Private:      imported.Private,
+	})
+	if err != nil {
+		t.Fatalf("ReadResource: %s", err)
+	}
+
+	return readResp
+}
+
+func replicationTaskStateModel(t *testing.T, state *tfprotov6.DynamicValue) ReplicationTaskResourceModel {
+	t.Helper()
+
+	schemaResp := getReplicationTaskResourceSchema(t)
+	raw, err := state.Unmarshal(replicationTaskObjectType)
+	if err != nil {
+		t.Fatalf("unmarshal state: %s", err)
+	}
+
+	var data ReplicationTaskResourceModel
+	if diags := (tfsdk.State{Schema: schemaResp.Schema, Raw: raw}).Get(context.Background(), &data); diags.HasError() {
+		t.Fatalf("reading state: %v", diags)
+	}
+
+	return data
+}
+
+// TestReplicationTaskResource_Import_UnsupportedMode covers importing a task
+// this resource does not manage: the import fails rather than adopting a task
+// the next apply would rewrite.
+func TestReplicationTaskResource_Import_UnsupportedMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*services.ReplicationTask)
+		summary string
+		value   string
+	}{
+		{
+			name:    "direction",
+			mutate:  func(task *services.ReplicationTask) { task.Direction = "PULL" },
+			summary: "Unsupported Replication Task Direction",
+			value:   "PULL",
+		},
+		{
+			name: "transport",
+			mutate: func(task *services.ReplicationTask) {
+				task.Transport = "LOCAL"
+				task.SSHCredentials = nil
+			},
+			summary: "Unsupported Replication Task Transport",
+			value:   "LOCAL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := testReplicationTask()
+			tt.mutate(task)
+
+			server := replicationTaskServer(t, &services.MockReplicationService{
+				GetFunc: func(ctx context.Context, id int64) (*services.ReplicationTask, error) {
+					return task, nil
+				},
+			})
+
+			readResp := importReplicationTask(t, server, "1")
+
+			var errs []*tfprotov6.Diagnostic
+			for _, d := range readResp.Diagnostics {
+				if d.Severity == tfprotov6.DiagnosticSeverityError {
+					errs = append(errs, d)
+				}
+			}
+
+			if len(errs) != 1 {
+				t.Fatalf("expected exactly 1 error diagnostic, got %d: %v", len(errs), readResp.Diagnostics)
+			}
+			if errs[0].Summary != tt.summary {
+				t.Errorf("expected summary %q, got %q", tt.summary, errs[0].Summary)
+			}
+			if !strings.Contains(errs[0].Detail, tt.value) ||
+				!strings.Contains(errs[0].Detail, "truenas_replication_task") {
+				t.Errorf("expected the detail to name the resource and %q, got %q", tt.value, errs[0].Detail)
+			}
+		})
+	}
+}
+
+// TestReplicationTaskResource_Import_Supported covers the ordinary import, and
+// the refresh that follows it: the import marker must not survive into later
+// reads, or a task imported successfully would start failing to refresh.
+func TestReplicationTaskResource_Import_Supported(t *testing.T) {
+	server := replicationTaskServer(t, &services.MockReplicationService{
+		GetFunc: func(ctx context.Context, id int64) (*services.ReplicationTask, error) {
+			return testReplicationTask(), nil
+		},
+	})
+
+	readResp := importReplicationTask(t, server, "1")
+	assertNoErrorDiagnostics(t, readResp.Diagnostics)
+
+	if len(readResp.Diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics importing a PUSH/SSH task, got %v", readResp.Diagnostics)
+	}
+
+	data := replicationTaskStateModel(t, readResp.NewState)
+	if data.ID.ValueString() != "1" || data.Direction.ValueString() != "PUSH" {
+		t.Fatalf("unexpected imported state: %s/%s", data.ID.ValueString(), data.Direction.ValueString())
+	}
+
+	// The task is flipped out of scope after the import, so a later refresh that
+	// still carried the import marker would surface as an error.
+	server = replicationTaskServer(t, &services.MockReplicationService{
+		GetFunc: func(ctx context.Context, id int64) (*services.ReplicationTask, error) {
+			task := testReplicationTask()
+			task.Transport = "LOCAL"
+			return task, nil
+		},
+	})
+
+	refreshResp, err := server.ReadResource(context.Background(), &tfprotov6.ReadResourceRequest{
+		TypeName:     "truenas_replication_task",
+		CurrentState: readResp.NewState,
+		Private:      readResp.Private,
+	})
+	if err != nil {
+		t.Fatalf("ReadResource: %s", err)
+	}
+
+	assertNoErrorDiagnostics(t, refreshResp.Diagnostics)
+
+	if len(refreshResp.Diagnostics) != 1 ||
+		refreshResp.Diagnostics[0].Severity != tfprotov6.DiagnosticSeverityWarning {
+		t.Fatalf("expected a single warning on refresh, got %v", refreshResp.Diagnostics)
+	}
+	if got := replicationTaskStateModel(t, refreshResp.NewState).Transport.ValueString(); got != "LOCAL" {
+		t.Errorf("expected the refreshed task to stay in state as LOCAL, got %q", got)
 	}
 }

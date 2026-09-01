@@ -123,9 +123,14 @@ today keeps working when the gaps are filled.
 | Actions | `replication.run`, `replication.run_onetime`, `replication.restore` | Running a task is an operation, not state Terraform can hold. Trigger runs from the UI, the CLI, or `midclt`. |
 
 Importing a task that uses one of the modes above is refused rather than silently
-adopted: reading a task whose `direction` or `transport` this resource does not manage
-fails with an error naming the offending value, so an out-of-scope task is never
-brought under management and then rewritten by the next apply.
+adopted: the import fails with an error naming the offending value, so an out-of-scope
+task is never brought under management and then rewritten by the next apply.
+
+A task already under management that is flipped to an out-of-scope mode on the server
+is treated differently: the refresh emits a warning and keeps the task in state with
+the server's values, so it stays plannable and, above all, destroyable. Applying the
+configuration unchanged will propose rewriting the task back into scope; `terraform
+destroy` or `terraform state rm` removes it instead.
 
 Fields the resource does not send are left at the server's defaults, and are not read
 back into state — changing one outside Terraform produces no diff.

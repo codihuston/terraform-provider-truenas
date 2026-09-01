@@ -543,7 +543,15 @@ func (r *ReplicationTaskResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	resp.Diagnostics.Append(validateReplicationTaskInScope(task)...)
+	importing := replicationImportPending(ctx, req.Private, &resp.Diagnostics)
+	if importing && resp.Private != nil {
+		resp.Diagnostics.Append(resp.Private.SetKey(ctx, replicationImportKey, nil)...)
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(replicationTaskScopeDiagnostics(task, importing)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -626,36 +634,68 @@ func (r *ReplicationTaskResource) Delete(ctx context.Context, req resource.Delet
 	}
 }
 
-// validateReplicationTaskInScope refuses a task the resource does not manage,
-// so importing or reading a mode outside this resource's scope fails with an
-// explanation instead of producing state that the next plan would rewrite.
-// Membership is tested against the supported slices, so widening either one is
-// all a future direction or transport needs.
-func validateReplicationTaskInScope(task *services.ReplicationTask) diag.Diagnostics {
+// replicationImportKey marks the state written by ImportState, so the Read the
+// framework runs straight afterwards can tell an import from a refresh.
+const replicationImportKey = "replication_task_import"
+
+// ImportState seeds the ID and records that the read which follows is an
+// import, so a task outside this resource's scope is refused rather than
+// adopted. BaseResource.ImportState does the ID passthrough alone.
+func (r *ReplicationTaskResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+
+	resp.Diagnostics.Append(resp.Private.SetKey(ctx, replicationImportKey, []byte(`{"pending":true}`))...)
+}
+
+// privateStateReader reads provider private state. The framework's concrete
+// type is internal to it, so the read side is taken through this interface.
+type privateStateReader interface {
+	GetKey(ctx context.Context, key string) ([]byte, diag.Diagnostics)
+}
+
+// replicationImportPending reports whether ImportState marked this read as the
+// one that follows an import.
+func replicationImportPending(ctx context.Context, private privateStateReader, diags *diag.Diagnostics) bool {
+	marker, markerDiags := private.GetKey(ctx, replicationImportKey)
+	diags.Append(markerDiags...)
+
+	return len(marker) > 0
+}
+
+// replicationTaskScopeDiagnostics reports the ways a task falls outside the
+// modes this resource manages. Membership is tested against the supported
+// slices, so widening either one is all a future direction or transport needs.
+//
+// An import is refused outright: adopting the task would only let the next plan
+// rewrite it. A refresh of a task already under management warns instead, so a
+// task somebody flipped out of scope on the server can still be planned and,
+// above all, destroyed.
+func replicationTaskScopeDiagnostics(task *services.ReplicationTask, importing bool) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if !slices.Contains(replicationSupportedDirections, task.Direction) {
-		diags.AddError(
-			"Unsupported Replication Task Direction",
-			fmt.Sprintf(
-				"Replication task %d uses direction %q, which truenas_replication_task does not manage. "+
-					"This resource currently supports only the SSH push case; see the resource "+
-					"documentation for the modes that are out of scope.",
-				task.ID, task.Direction,
-			),
+	add := func(summary, field, value string) {
+		detail := fmt.Sprintf(
+			"Replication task %d uses %s %q, which truenas_replication_task does not manage. "+
+				"This resource currently supports only the SSH push case; see the resource "+
+				"documentation for the modes that are out of scope.",
+			task.ID, field, value,
 		)
+
+		if importing {
+			diags.AddError(summary, detail)
+			return
+		}
+
+		diags.AddWarning(summary, detail+" The task is kept in Terraform state so it can still be "+
+			"planned and destroyed, but applying this configuration may propose rewriting it.")
+	}
+
+	if !slices.Contains(replicationSupportedDirections, task.Direction) {
+		add("Unsupported Replication Task Direction", "direction", task.Direction)
 	}
 
 	if !slices.Contains(replicationSupportedTransports, task.Transport) {
-		diags.AddError(
-			"Unsupported Replication Task Transport",
-			fmt.Sprintf(
-				"Replication task %d uses transport %q, which truenas_replication_task does not manage. "+
-					"This resource currently supports only the SSH push case; see the resource "+
-					"documentation for the modes that are out of scope.",
-				task.ID, task.Transport,
-			),
-		)
+		add("Unsupported Replication Task Transport", "transport", task.Transport)
 	}
 
 	return diags
