@@ -18,5 +18,7 @@ func TestTrueNASServices_FieldTypes(t *testing.T) {
 		Snapshot:   &truenas.MockSnapshotService{},
 		Virt:       &truenas.MockVirtService{},
 		VM:         &truenas.MockVMService{},
+		Group:      &MockGroupService{},
+		User:       &MockUserService{},
 	}
 }

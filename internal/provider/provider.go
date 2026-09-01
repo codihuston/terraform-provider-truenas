@@ -385,6 +385,8 @@ func (p *TrueNASProvider) Configure(ctx context.Context, req provider.ConfigureR
 		Snapshot:   truenas.NewSnapshotService(finalClient, version),
 		Virt:       truenas.NewVirtService(finalClient, version),
 		VM:         truenas.NewVMService(finalClient, version),
+		Group:      services.NewGroupService(finalClient),
+		User:       services.NewUserService(finalClient),
 	}
 
 	resp.DataSourceData = svc
@@ -417,5 +419,7 @@ func (p *TrueNASProvider) Resources(ctx context.Context) []func() resource.Resou
 		resources.NewAppRegistryResource,
 		resources.NewVMResource,
 		resources.NewZvolResource,
+		resources.NewGroupResource,
+		resources.NewUserResource,
 	}
 }
