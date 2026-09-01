@@ -203,7 +203,9 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 }
 
 // reconcile drives the live service towards the desired boot and run state in
-// data, then overwrites data with the state the server reports back.
+// data, then overwrites data with the state the server reports back. Terraform
+// rejects an applied value that disagrees with a known plan, so a server that
+// refuses the requested state is reported as an actionable error instead.
 func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceModel, diags *diag.Diagnostics) {
 	name := data.Name.ValueString()
 
@@ -260,6 +262,36 @@ func (r *ServiceResource) reconcile(ctx context.Context, data *ServiceResourceMo
 			"Service Not Found",
 			fmt.Sprintf("Service %q disappeared while it was being configured.", name),
 		)
+		return
+	}
+
+	mismatch := false
+
+	if enable := data.Enable.ValueBool(); enable != svc.Enable {
+		mismatch = true
+		diags.AddError(
+			"Service Enable Not Applied",
+			fmt.Sprintf("Service %q reports enable=%t after its update call succeeded, but the configuration asks for enable=%t.",
+				name, svc.Enable, enable),
+		)
+	}
+
+	if running := data.Running.ValueBool(); running != svc.Running() {
+		mismatch = true
+		if running {
+			diags.AddError(
+				"Service Not Running",
+				fmt.Sprintf("Service %q did not stay running after its start call succeeded. Check the service's logs on the appliance for why it stopped.", name),
+			)
+		} else {
+			diags.AddError(
+				"Service Still Running",
+				fmt.Sprintf("Service %q is still running after its stop call succeeded. Check the service's logs on the appliance for why it stayed up.", name),
+			)
+		}
+	}
+
+	if mismatch {
 		return
 	}
 

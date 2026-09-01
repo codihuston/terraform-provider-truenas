@@ -469,6 +469,86 @@ func TestServiceResource_Create_RefreshNotFound(t *testing.T) {
 	}
 }
 
+func TestServiceResource_Create_ServiceDoesNotStayRunning(t *testing.T) {
+	rec := &serviceRecorder{gets: []*services.SystemService{
+		stoppedService(),
+		{ID: 9, Name: "nfs", Enable: true, State: "STOPPED"},
+	}}
+	r := newServiceResource(rec.mock())
+
+	schemaResp := getServiceResourceSchema(t)
+	resp := &resource.CreateResponse{State: tfsdk.State{Schema: schemaResp.Schema}}
+
+	r.Create(context.Background(), resource.CreateRequest{
+		Plan: tfsdk.Plan{Schema: schemaResp.Schema, Raw: createServiceModelValue(enabledServiceParams())},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected error")
+	}
+	err := resp.Diagnostics.Errors()[0]
+	if err.Summary() != "Service Not Running" {
+		t.Errorf("unexpected summary %q", err.Summary())
+	}
+	if !strings.Contains(err.Detail(), `"nfs"`) {
+		t.Errorf("expected detail to name the service, got %q", err.Detail())
+	}
+}
+
+func TestServiceResource_Create_EnableNotApplied(t *testing.T) {
+	rec := &serviceRecorder{gets: []*services.SystemService{
+		stoppedService(),
+		{ID: 9, Name: "nfs", Enable: false, State: services.ServiceStateRunning},
+	}}
+	r := newServiceResource(rec.mock())
+
+	schemaResp := getServiceResourceSchema(t)
+	resp := &resource.CreateResponse{State: tfsdk.State{Schema: schemaResp.Schema}}
+
+	r.Create(context.Background(), resource.CreateRequest{
+		Plan: tfsdk.Plan{Schema: schemaResp.Schema, Raw: createServiceModelValue(enabledServiceParams())},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected error")
+	}
+	err := resp.Diagnostics.Errors()[0]
+	if err.Summary() != "Service Enable Not Applied" {
+		t.Errorf("unexpected summary %q", err.Summary())
+	}
+	if !strings.Contains(err.Detail(), `"nfs"`) {
+		t.Errorf("expected detail to name the service, got %q", err.Detail())
+	}
+}
+
+func TestServiceResource_Update_ServiceStaysRunning(t *testing.T) {
+	rec := &serviceRecorder{gets: []*services.SystemService{runningService(), runningService()}}
+	r := newServiceResource(rec.mock())
+
+	schemaResp := getServiceResourceSchema(t)
+	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schemaResp.Schema}}
+
+	r.Update(context.Background(), resource.UpdateRequest{
+		State: tfsdk.State{Schema: schemaResp.Schema, Raw: createServiceModelValue(enabledServiceParams())},
+		Plan: tfsdk.Plan{Schema: schemaResp.Schema, Raw: createServiceModelValue(
+			serviceModelParams{ID: "nfs", Name: "nfs", Enable: true, Running: false})},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected error")
+	}
+	err := resp.Diagnostics.Errors()[0]
+	if err.Summary() != "Service Still Running" {
+		t.Errorf("unexpected summary %q", err.Summary())
+	}
+	if !strings.Contains(err.Detail(), `"nfs"`) {
+		t.Errorf("expected detail to name the service, got %q", err.Detail())
+	}
+	if rec.stopped != 1 {
+		t.Errorf("expected 1 stop, got %d", rec.stopped)
+	}
+}
+
 func TestServiceResource_Create_InvalidPlan(t *testing.T) {
 	r := newServiceResource(&services.MockSystemServices{})
 
