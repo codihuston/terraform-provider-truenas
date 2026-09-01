@@ -46,7 +46,7 @@ resource "truenas_dataset" "example" {
 ## Features
 
 - **Data Sources**: Query pools and datasets
-- **Resources**: Manage storage, sharing, scheduled tasks, applications, virtualization, and accounts
+- **Resources**: Manage storage, sharing, replication, scheduled tasks, applications, virtualization, and accounts
 
 See the [documentation](#documentation) for the full list of resources and data sources.
 
