@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"sync"
 	"testing"
@@ -232,16 +231,6 @@ func (p *fakeProvider) Resources(_ context.Context) []func() resource.Resource {
 func fakeProviderFactories(keychain *fakeKeychain) map[string]func() (tfprotov6.ProviderServer, error) {
 	return map[string]func() (tfprotov6.ProviderServer, error){
 		"truenas": providerserver.NewProtocol6WithError(&fakeProvider{keychain: keychain}),
-	}
-}
-
-// requireTerraformCLI skips when no Terraform binary is available, so the unit
-// suite keeps running on machines without one.
-func requireTerraformCLI(t *testing.T) {
-	t.Helper()
-
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform CLI not available")
 	}
 }
 
