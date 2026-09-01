@@ -43,6 +43,18 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
+// testAccRequireLiveTarget skips unless the acceptance suite is enabled. Tests
+// that have to reach the server while building their configuration run before
+// resource.Test applies its own TF_ACC gate, so they apply it here first.
+func testAccRequireLiveTarget(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+	testAccPreCheck(t)
+}
+
 // testAccAPIUser returns the user the API key belongs to.
 func testAccAPIUser() string {
 	if user := os.Getenv(envAPIUser); user != "" {
