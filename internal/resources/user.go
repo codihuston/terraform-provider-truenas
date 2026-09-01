@@ -158,11 +158,13 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Description: "Email address for the account. Accounts with the `FULL_ADMIN` role receive " +
 					"alerts and notifications at this address.",
 				Optional: true,
+				Computed: true,
 			},
 			"ssh_public_key": schema.StringAttribute{
 				Description: "SSH public keys authorised for this account. TrueNAS writes these to the " +
 					"user's home directory, so `home` must point at a writable path.",
 				Optional: true,
+				Computed: true,
 			},
 			"ssh_password_enabled": schema.BoolAttribute{
 				Description: "Allow SSH password authentication. Leave disabled and use `ssh_public_key` " +
@@ -235,8 +237,10 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 }
 
 // ValidateConfig enforces the API rule that a primary group is either supplied
-// or created, and rejects the SMB and password_disabled combination up front so
-// the error surfaces at plan time rather than mid-apply.
+// or created, rejects the SMB and password_disabled combination up front so the
+// error surfaces at plan time rather than mid-apply, and requires password and
+// password_wo_version to be configured together so a password change cannot be
+// silently dropped.
 func (r *UserResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var data UserResourceModel
 
@@ -261,6 +265,26 @@ func (r *UserResource) ValidateConfig(ctx context.Context, req resource.Validate
 			path.Root("group"),
 			"Conflicting Primary Group",
 			"group and group_create are mutually exclusive; TrueNAS ignores group when creating a new primary group.",
+		)
+	}
+
+	// An unknown value counts as set: it resolves to a variable or another
+	// resource's attribute.
+	passwordSet := !data.Password.IsNull()
+	versionSet := !data.PasswordWOVersion.IsNull()
+
+	switch {
+	case passwordSet && !versionSet:
+		resp.Diagnostics.AddAttributeError(
+			path.Root("password_wo_version"),
+			"Missing Password Version",
+			"password is write-only, so password_wo_version is the only way to re-send it. Set password_wo_version alongside password.",
+		)
+	case !passwordSet && versionSet:
+		resp.Diagnostics.AddAttributeError(
+			path.Root("password"),
+			"Missing Password",
+			"password_wo_version has no effect without password. Set password alongside password_wo_version.",
 		)
 	}
 

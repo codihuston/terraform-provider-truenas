@@ -162,6 +162,29 @@ func TestUserResource_ValidateConfig(t *testing.T) {
 			wantError: true,
 		},
 		{
+			name: "password paired with its version",
+			overrides: map[string]tftypes.Value{
+				"password":            tftypes.NewValue(tftypes.String, "hunter2"),
+				"password_wo_version": tftypes.NewValue(tftypes.Number, 1),
+				"password_disabled":   tftypes.NewValue(tftypes.Bool, false),
+			},
+		},
+		{
+			name: "password without a version",
+			overrides: map[string]tftypes.Value{
+				"password":          tftypes.NewValue(tftypes.String, "hunter2"),
+				"password_disabled": tftypes.NewValue(tftypes.Bool, false),
+			},
+			wantError: true,
+		},
+		{
+			name: "version without a password",
+			overrides: map[string]tftypes.Value{
+				"password_wo_version": tftypes.NewValue(tftypes.Number, 2),
+			},
+			wantError: true,
+		},
+		{
 			name: "smb with password authentication disabled",
 			overrides: map[string]tftypes.Value{
 				"smb": tftypes.NewValue(tftypes.Bool, true),

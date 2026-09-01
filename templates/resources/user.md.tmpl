@@ -51,6 +51,10 @@ resource "truenas_user" "support" {
 }
 ```
 
+`password` and `password_wo_version` must be configured together. Bumping the
+version without a password would record a rotation that never happened, so the
+provider rejects either one on its own at plan time.
+
 Write-only attributes require Terraform 1.11 or later.
 
 [write-only]: https://developer.hashicorp.com/terraform/language/resources/ephemeral/write-only
@@ -65,9 +69,14 @@ directory, and the path TrueNAS actually assigned is exported as `home_path`.
 provider sends `home_path` instead, because TrueNAS accepts a parent directory
 only when creating a home and rejects it on a later update.
 
-`home`, `home_create` and `home_mode` are inputs TrueNAS does not report back.
-Changes made to them outside Terraform are not detected, and after an import they
-hold their default values rather than the account's real configuration.
+`home`, `home_create` and `home_mode` are inputs TrueNAS does not report back,
+so changes made to them outside Terraform are not detected. After an import
+`home` is seeded from the path TrueNAS assigned, which matches the configuration
+when the home directory was supplied verbatim but is the created
+`<home>/<username>` directory when the account was created with `home_create`;
+the first plan after such an import therefore shows a change to `home`.
+`home_create` and `home_mode` fall back to their defaults, because TrueNAS never
+reports them.
 
 ## Group membership
 

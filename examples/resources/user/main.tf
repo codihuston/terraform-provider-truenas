@@ -10,6 +10,9 @@ resource "truenas_user" "deploy" {
   group  = truenas_group.developers.id
   groups = [truenas_group.developers.id]
 
+  # The primary group has its own resource, so leave it behind on destroy.
+  delete_group = false
+
   home        = "/mnt/tank/home"
   home_create = true
   shell       = "/usr/bin/bash"
