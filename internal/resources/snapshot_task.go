@@ -204,16 +204,16 @@ func (r *SnapshotTaskResource) Schema(ctx context.Context, req resource.SchemaRe
 					"begin": schema.StringAttribute{
 						Description: "Start of the daily window in which the task may run, as \"HH:MM\". " +
 							"A begin later than end defines a window that wraps past midnight.",
-						Optional:    true,
-						Computed:    true,
-						Default:     stringdefault.StaticString("00:00"),
+						Optional: true,
+						Computed: true,
+						Default:  stringdefault.StaticString("00:00"),
 					},
 					"end": schema.StringAttribute{
 						Description: "End of the daily window in which the task may run, as \"HH:MM\". " +
 							"An end earlier than begin defines a window that wraps past midnight.",
-						Optional:    true,
-						Computed:    true,
-						Default:     stringdefault.StaticString("23:59"),
+						Optional: true,
+						Computed: true,
+						Default:  stringdefault.StaticString("23:59"),
 					},
 				},
 			},
