@@ -298,11 +298,9 @@ func (r *APIKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	// The reply carries no secret; the plan holds whatever state does.
-	key := plan.Key
-
+	// The reply carries no secret, and mapAPIKeyToModel never writes Key, so
+	// the planned value the key attribute carried forward from state stands.
 	mapAPIKeyToModel(apiKey, &plan)
-	plan.Key = key
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }

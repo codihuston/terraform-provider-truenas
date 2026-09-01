@@ -91,17 +91,28 @@ func (v TimestampStringValue) Equal(o attr.Value) bool {
 }
 
 // ValidateAttribute reports a configured value that is not an RFC 3339
-// timestamp, so the error surfaces during plan rather than as an API rejection.
+// timestamp, or one TrueNAS cannot represent, so the error surfaces during plan
+// rather than as an API rejection.
 func (v TimestampStringValue) ValidateAttribute(ctx context.Context, req xattr.ValidateAttributeRequest, resp *xattr.ValidateAttributeResponse) {
 	if v.IsNull() || v.IsUnknown() {
 		return
 	}
 
-	if _, err := time.Parse(time.RFC3339, v.ValueString()); err != nil {
+	parsed, err := time.Parse(time.RFC3339, v.ValueString())
+	if err != nil {
 		resp.Diagnostics.AddAttributeError(
 			req.Path,
 			"Invalid RFC 3339 Timestamp",
 			fmt.Sprintf("Expected an RFC 3339 timestamp such as \"2035-01-02T15:04:05Z\", got %q: %s", v.ValueString(), err),
+		)
+		return
+	}
+
+	if parsed.Nanosecond()%int(time.Millisecond) != 0 {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Unsupported Timestamp Precision",
+			fmt.Sprintf("TrueNAS stores timestamps as whole milliseconds since the Unix epoch, so the sub-millisecond precision in %q would be truncated on the wire and the applied value would not match the configured one. Round the timestamp to a whole millisecond.", v.ValueString()),
 		)
 	}
 }

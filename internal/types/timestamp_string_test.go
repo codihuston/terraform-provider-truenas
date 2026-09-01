@@ -86,14 +86,17 @@ func TestTimestampStringValue_ValidateAttribute(t *testing.T) {
 		value   TimestampStringValue
 		wantErr bool
 	}{
-		"utc":         {value: NewTimestampStringValue("2030-01-02T03:04:05Z")},
-		"offset":      {value: NewTimestampStringValue("2030-01-02T04:04:05+01:00")},
-		"fractional":  {value: NewTimestampStringValue("2030-01-02T03:04:05.5Z")},
-		"null":        {value: NewTimestampStringNull()},
-		"unknown":     {value: NewTimestampStringUnknown()},
-		"date only":   {value: NewTimestampStringValue("2030-01-02"), wantErr: true},
-		"no offset":   {value: NewTimestampStringValue("2030-01-02T03:04:05"), wantErr: true},
-		"nonsensical": {value: NewTimestampStringValue("tomorrow"), wantErr: true},
+		"utc":             {value: NewTimestampStringValue("2030-01-02T03:04:05Z")},
+		"offset":          {value: NewTimestampStringValue("2030-01-02T04:04:05+01:00")},
+		"fractional":      {value: NewTimestampStringValue("2030-01-02T03:04:05.5Z")},
+		"milliseconds":    {value: NewTimestampStringValue("2030-01-02T03:04:05.123Z")},
+		"sub-millisecond": {value: NewTimestampStringValue("2030-01-02T03:04:05.5001Z"), wantErr: true},
+		"microseconds":    {value: NewTimestampStringValue("2030-01-02T03:04:05.000001Z"), wantErr: true},
+		"null":            {value: NewTimestampStringNull()},
+		"unknown":         {value: NewTimestampStringUnknown()},
+		"date only":       {value: NewTimestampStringValue("2030-01-02"), wantErr: true},
+		"no offset":       {value: NewTimestampStringValue("2030-01-02T03:04:05"), wantErr: true},
+		"nonsensical":     {value: NewTimestampStringValue("tomorrow"), wantErr: true},
 	}
 
 	for name, tt := range tests {
