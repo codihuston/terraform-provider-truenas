@@ -1,0 +1,108 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+### Nightly Push to a Backup Host
+
+{{ tffile "examples/resources/replication_task/main.tf" }}
+
+### Manual Task
+
+Omit the `schedule` block for a task that only runs when it is triggered by hand.
+`auto` reads back as `false`, and the task keeps its configuration until it is run.
+
+```terraform
+resource "truenas_replication_task" "seed" {
+  name            = "initial seed"
+  ssh_credentials = var.backup_ssh_credential
+
+  source_datasets = ["tank/archive"]
+  target_dataset  = "backup/archive"
+
+  also_include_naming_schema = ["auto-%Y-%m-%d_%H-%M"]
+
+  retention_policy = "SOURCE"
+}
+```
+
+## Snapshots Are Not Created Here
+
+A replication task transfers snapshots; it never takes them. `also_include_naming_schema`
+matches snapshots that already exist on the source, so pair the task with whatever
+creates them — a periodic snapshot task using the same naming schema, for example.
+A task whose schema matches nothing runs successfully and transfers nothing.
+
+## SSH Credentials
+
+`ssh_credentials` is the numeric ID of a keychain credential of type `SSH_CREDENTIALS`.
+The provider does not manage keychain credentials: create the credential in the TrueNAS
+UI under **Credentials > Backup Credentials > SSH Connections**, or through
+`keychaincredential.create`, and pass its ID here.
+
+Replication runs `zfs` on the target host. The credential normally authenticates as
+`root`; for any other account, set `sudo = true` and configure passwordless sudo on
+the target.
+
+## Validation
+
+These cross-field rules are checked during `terraform plan`, so a configuration the
+API would reject never reaches the server:
+
+- `ssh_credentials` is required for the `SSH` transport.
+- `lifetime_value` and `lifetime_unit` are required by the `CUSTOM` retention policy,
+  and rejected by every other policy.
+- `exclude` requires `recursive`.
+
+## Unimplemented by Scope Decision
+
+This resource covers one shape deliberately: an SSH push from local datasets to a
+target on a remote SSH credential. The `replication.*` API supports considerably more,
+and the following is **not** implemented. Each item maps to an optional attribute that
+can be added without changing anything documented above, so a configuration written
+today keeps working when the gaps are filled.
+
+| Area | Omitted | Notes |
+| --- | --- | --- |
+| Direction | `PULL` | `direction` accepts `PUSH` only. Pull replication needs `naming_schema` instead of `also_include_naming_schema`, and a different set of validation rules. |
+| Transport | `LOCAL`, `SSH+NETCAT` | `transport` accepts `SSH` only. `SSH+NETCAT` additionally needs `netcat_active_side`, `netcat_active_side_listen_address`, `netcat_active_side_port_min`, `netcat_active_side_port_max` and `netcat_passive_side_connect_address`; `LOCAL` forbids `ssh_credentials`. |
+| Snapshot selection | `periodic_snapshot_tasks`, `name_regex` | Bind the task to a naming schema instead. Binding periodic snapshot tasks also changes how `schedule` behaves, replacing it with `restrict_schedule`. |
+| Scheduling | `restrict_schedule`, `only_matching_schedule` | Only relevant to tasks bound to periodic snapshot tasks. |
+| Retention | `lifetimes` | Multi-tier retention, where each tier has its own cron and lifetime. Single-tier `CUSTOM` retention is supported. |
+| Replication mode | `replicate` | Full ZFS replication of the dataset, rather than of matching snapshots. |
+| Properties | `properties`, `properties_exclude`, `properties_override` | The server's defaults apply: dataset properties are sent along with snapshots. |
+| Encryption | `encryption`, `encryption_inherit`, `encryption_key`, `encryption_key_format`, `encryption_key_location` | Encrypting the replicated datasets at the destination. |
+| Stream tuning | `large_block`, `embed`, `compressed` | The server's defaults apply. `compression` and `speed_limit`, which shape the SSH stream itself, are supported. |
+| Failure handling | `hold_pending_snapshots` | Whether retention may delete source snapshots after a failed run. |
+| Actions | `replication.run`, `replication.run_onetime`, `replication.restore` | Running a task is an operation, not state Terraform can hold. Trigger runs from the UI, the CLI, or `midclt`. |
+
+Importing a task that uses one of the modes above is refused rather than silently
+adopted: the import fails with an error naming the offending value, so an out-of-scope
+task is never brought under management and then rewritten by the next apply.
+
+A task already under management that is flipped to an out-of-scope mode on the server
+is treated differently: the refresh emits a warning and keeps the task in state with
+the server's values, so it stays plannable and, above all, destroyable. Applying the
+configuration unchanged will propose rewriting the task back into scope; `terraform
+destroy` or `terraform state rm` removes it instead.
+
+Fields the resource does not send are left at the server's defaults, and are not read
+back into state — changing one outside Terraform produces no diff.
+
+## Import
+
+Replication tasks can be imported using the numeric task ID:
+
+```shell
+terraform import truenas_replication_task.example 1
+```
+
+{{ .SchemaMarkdown | trimspace }}

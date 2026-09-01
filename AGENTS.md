@@ -30,6 +30,7 @@ Run them with `mise run test-acc` after exporting:
 | `TRUENAS_SSH_USER` | SSH user the key belongs to (default `root`) |
 | `TRUENAS_SSH_HOST_KEY_FINGERPRINT` | Host key fingerprint — must match the algorithm the client negotiates (usually ECDSA, not ED25519); get all of them with `ssh-keyscan <host> \| ssh-keygen -lf -` |
 | `TRUENAS_ACC_POOL` | Pool to create test datasets in (default `tank`) |
+| `TRUENAS_ACC_SSH_CREDENTIAL` | Existing `SSH_CREDENTIALS` keychain credential ID for replication tests. Unset, the suite provisions a loopback one against the target itself and removes it afterwards |
 
 Tests must assert server-side state through the API (not just Terraform state)
 and clean up after themselves via `CheckDestroy`.
