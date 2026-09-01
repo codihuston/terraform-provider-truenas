@@ -858,13 +858,15 @@ func TestAPIKeyResource_Schema_KeyUsesStateForUnknown(t *testing.T) {
 func TestRequiresReplaceWhenStoringKeyAgain(t *testing.T) {
 	tests := map[string]struct {
 		state  bool
-		config bool
+		config types.Bool
+		plan   bool
 		want   bool
 	}{
-		"storage turned back on": {state: false, config: true, want: true},
-		"storage turned off":     {state: true, config: false, want: false},
-		"storage stays on":       {state: true, config: true, want: false},
-		"storage stays off":      {state: false, config: false, want: false},
+		"storage turned back on":        {state: false, config: types.BoolValue(true), plan: true, want: true},
+		"storage turned off":            {state: true, config: types.BoolValue(false), plan: false, want: false},
+		"storage stays on":              {state: true, config: types.BoolValue(true), plan: true, want: false},
+		"storage stays off":             {state: false, config: types.BoolValue(false), plan: false, want: false},
+		"store_key dropped from config": {state: false, config: types.BoolNull(), plan: true, want: true},
 	}
 
 	for name, tt := range tests {
@@ -872,7 +874,8 @@ func TestRequiresReplaceWhenStoringKeyAgain(t *testing.T) {
 			resp := &boolplanmodifier.RequiresReplaceIfFuncResponse{}
 			requiresReplaceWhenStoringKeyAgain(context.Background(), planmodifier.BoolRequest{
 				StateValue:  types.BoolValue(tt.state),
-				ConfigValue: types.BoolValue(tt.config),
+				ConfigValue: tt.config,
+				PlanValue:   types.BoolValue(tt.plan),
 			}, resp)
 
 			if resp.RequiresReplace != tt.want {

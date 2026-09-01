@@ -150,11 +150,13 @@ func (r *APIKeyResource) Schema(ctx context.Context, req resource.SchemaRequest,
 	}
 }
 
-// requiresReplaceWhenStoringKeyAgain replaces the key when key storage is
-// switched back on: the secret exists only in the reply to a creation, so an
-// existing key can never start being stored.
+// requiresReplaceWhenStoringKeyAgain replaces the key when the plan switches
+// key storage back on: the secret exists only in the reply to a creation, so
+// an existing key can never start being stored. The planned value is what
+// matters, since it already carries the schema default for a config that
+// omits store_key.
 func requiresReplaceWhenStoringKeyAgain(ctx context.Context, req planmodifier.BoolRequest, resp *boolplanmodifier.RequiresReplaceIfFuncResponse) {
-	resp.RequiresReplace = !req.StateValue.ValueBool() && req.ConfigValue.ValueBool()
+	resp.RequiresReplace = !req.StateValue.ValueBool() && req.PlanValue.ValueBool()
 }
 
 func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
