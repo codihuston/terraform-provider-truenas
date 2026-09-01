@@ -16,9 +16,9 @@ Manages a ZFS replication task that pushes snapshots to a remote host over SSH. 
 ```terraform
 # Push nightly snapshots of an archive dataset to a backup host over SSH.
 #
-# The SSH connection is a keychain credential of type SSH_CREDENTIALS. The
-# provider does not manage keychain credentials, so create it in the TrueNAS
-# UI under Credentials > Backup Credentials and reference its numeric ID.
+# The SSH connection is a keychain credential of type SSH_CREDENTIALS. Manage it
+# with truenas_ssh_credential and pass its id, or reference the numeric ID of a
+# credential created outside Terraform, as this example does.
 variable "backup_ssh_credential" {
   description = "ID of the SSH_CREDENTIALS keychain credential for the backup host."
   type        = number
@@ -82,9 +82,10 @@ A task whose schema matches nothing runs successfully and transfers nothing.
 ## SSH Credentials
 
 `ssh_credentials` is the numeric ID of a keychain credential of type `SSH_CREDENTIALS`.
-The provider does not manage keychain credentials: create the credential in the TrueNAS
-UI under **Credentials > Backup Credentials > SSH Connections**, or through
-`keychaincredential.create`, and pass its ID here.
+Manage that credential with `truenas_ssh_credential` and pass its `id` here, or pass
+the ID of a credential created outside Terraform — in the TrueNAS UI under
+**Credentials > Backup Credentials > SSH Connections**, or through
+`keychaincredential.create`.
 
 Replication runs `zfs` on the target host. The credential normally authenticates as
 `root`; for any other account, set `sudo = true` and configure passwordless sudo on
