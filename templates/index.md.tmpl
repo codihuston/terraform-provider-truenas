@@ -17,7 +17,7 @@ The TrueNAS provider enables Terraform to manage TrueNAS SCALE and Community edi
 - **Replication**: Push ZFS snapshots to a remote host over SSH
 - **Virtualization**: Manage Incus/LXC containers (TrueNAS 25.0+)
 - **Automation**: Create cron jobs and scheduled tasks
-- **Accounts**: Manage local users and groups
+- **Accounts**: Manage local users, groups, and API keys
 
 ## Authentication
 

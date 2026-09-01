@@ -1,0 +1,63 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+### Basic API Key
+
+{{ tffile "examples/resources/api_key/main.tf" }}
+
+### Passing the Key to Another Provider Without Storing It
+
+Set `store_key = false` to keep the secret out of Terraform state. The value is
+readable only by resources and providers evaluated in the **same apply that
+creates the key**; from the next refresh onwards `key` reads as `null` and
+nothing can recover it.
+
+```terraform
+resource "truenas_api_key" "bootstrap" {
+  name      = "bootstrap"
+  username  = "truenas_admin"
+  store_key = false
+}
+
+# Consumed in the same apply that creates the key.
+resource "vault_kv_secret_v2" "truenas" {
+  mount = "kv"
+  name  = "truenas/bootstrap"
+
+  data_json = jsonencode({
+    api_key = truenas_api_key.bootstrap.key
+  })
+}
+```
+
+> **Note:** TrueNAS returns the key secret **only** in the reply that creates it. It is never readable again, so `key` is `null` for an imported key, and for any key created with `store_key = false` once its first refresh has run.
+
+> **Note:** Because the secret can only be captured at creation, changing `store_key` from `false` to `true` destroys and recreates the key. Anything still using the old secret stops authenticating.
+
+> **Note:** For a key created with `store_key = false`, `store_key` must be known at plan time. Terraform cannot decide whether storing the key again requires issuing a new one while the value is unknown, so planning fails with an error.
+
+> **Note:** `username` cannot be changed on an existing key. Changing it destroys and recreates the key.
+
+> **Note:** TrueNAS revokes keys on its own, for instance once `expires_at` passes. Such a key still exists and stays in state, with `revoked` set to `true` and `revoked_reason` explaining why.
+
+## Import
+
+API keys can be imported using the numeric key ID:
+
+```shell
+terraform import truenas_api_key.example 1
+```
+
+The secret is not part of an import: `key` reads as `null` on an imported key.
+
+{{ .SchemaMarkdown | trimspace }}

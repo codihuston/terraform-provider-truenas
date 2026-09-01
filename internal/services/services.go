@@ -13,6 +13,7 @@ type TrueNASServices struct {
 	// Remove this field once all resources use typed service methods.
 	Client client.Client
 
+	APIKey       APIKeyServiceAPI
 	App          truenas.AppServiceAPI
 	CloudSync    truenas.CloudSyncServiceAPI
 	Cron         truenas.CronServiceAPI

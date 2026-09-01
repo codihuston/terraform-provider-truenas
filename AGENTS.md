@@ -10,6 +10,7 @@ This repository contains a Terraform provider for TrueNAS SCALE and Community ed
    - `mr api-docs api_methods_{namespace}` - Browse methods in a namespace (e.g., `api_methods_cloudsync`)
    - `mr api-docs {doc}` - View formatted documentation (uses lynx, add `-r` for raw RST)
    - `mr midclt-method {method}` - Get JSON schema for a specific method (better for implementation)
+   - Schemas describe timestamps as RFC 3339 strings, but the wire format is `{"$date": <epoch ms>}` in both directions; a plain string is rejected with EINVAL. See `apiTime` in `internal/services/api_key.go`.
 
 ### Acceptance tests
 
