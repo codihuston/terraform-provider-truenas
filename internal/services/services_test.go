@@ -14,6 +14,7 @@ func TestTrueNASServices_FieldTypes(t *testing.T) {
 		Cron:       &truenas.MockCronService{},
 		Dataset:    &truenas.MockDatasetService{},
 		Filesystem: &truenas.MockFilesystemService{},
+		SharingNFS: &MockSharingNFSService{},
 		Snapshot:   &truenas.MockSnapshotService{},
 		Virt:       &truenas.MockVirtService{},
 		VM:         &truenas.MockVMService{},

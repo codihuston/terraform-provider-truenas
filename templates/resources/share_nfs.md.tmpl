@@ -1,0 +1,47 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+### Basic NFS Share
+
+{{ tffile "examples/resources/share_nfs/main.tf" }}
+
+### Read-Only Share Restricted to Specific Hosts
+
+```terraform
+resource "truenas_share_nfs" "backups" {
+  path    = "/mnt/tank/backups"
+  comment = "Offsite backup target"
+
+  hosts = ["backup01.example.com", "10.0.0.50"]
+  ro    = true
+
+  mapall_user  = "nobody"
+  mapall_group = "nogroup"
+}
+```
+
+> **Note:** `maproot_*` and `mapall_*` are mutually exclusive, and each `_group` attribute requires its matching `_user` attribute. Both rules are enforced during `terraform plan`.
+
+> **Note:** Creating a share does not start the NFS service. Enable the NFS service separately before clients can mount the export.
+
+> **Note:** `aliases` is read-only. TrueNAS accepts the field but discards any value, so it always reads back empty.
+
+## Import
+
+NFS shares can be imported using the numeric share ID:
+
+```shell
+terraform import truenas_share_nfs.example 1
+```
+
+{{ .SchemaMarkdown | trimspace }}
