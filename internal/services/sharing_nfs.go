@@ -3,17 +3,10 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
 
 	truenas "github.com/deevus/truenas-go"
-	"github.com/deevus/truenas-go/client"
 )
-
-// errnoENOENT is the POSIX ENOENT value the API reports in JSON-RPC error data
-// when an instance does not exist.
-const errnoENOENT = 2
 
 // NFSShare is the user-facing representation of a TrueNAS NFS share
 // (the `sharing.nfs` API namespace).
@@ -107,7 +100,7 @@ func (s *SharingNFSService) Create(ctx context.Context, opts CreateNFSShareOpts)
 func (s *SharingNFSService) Get(ctx context.Context, id int64) (*NFSShare, error) {
 	result, err := s.client.Call(ctx, "sharing.nfs.get_instance", id)
 	if err != nil {
-		if isNFSNotFoundError(err) {
+		if isNotFoundError(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -168,26 +161,17 @@ func nfsOptsToParams(opts CreateNFSShareOpts) map[string]any {
 	return map[string]any{
 		"path":             opts.Path,
 		"comment":          opts.Comment,
-		"networks":         nfsStringList(opts.Networks),
-		"hosts":            nfsStringList(opts.Hosts),
+		"networks":         stringList(opts.Networks),
+		"hosts":            stringList(opts.Hosts),
 		"ro":               opts.ReadOnly,
 		"maproot_user":     opts.MaprootUser,
 		"maproot_group":    opts.MaprootGroup,
 		"mapall_user":      opts.MapallUser,
 		"mapall_group":     opts.MapallGroup,
-		"security":         nfsStringList(opts.Security),
+		"security":         stringList(opts.Security),
 		"enabled":          opts.Enabled,
 		"expose_snapshots": opts.ExposeSnapshots,
 	}
-}
-
-// nfsStringList normalises a nil slice to an empty slice so the API receives
-// `[]` rather than `null`, which it rejects.
-func nfsStringList(in []string) []string {
-	if in == nil {
-		return []string{}
-	}
-	return in
 }
 
 // nfsShareFromResponse converts a wire-format response to a user-facing NFSShare.
@@ -195,38 +179,18 @@ func nfsShareFromResponse(resp nfsShareResponse) NFSShare {
 	return NFSShare{
 		ID:              resp.ID,
 		Path:            resp.Path,
-		Aliases:         nfsStringList(resp.Aliases),
+		Aliases:         stringList(resp.Aliases),
 		Comment:         resp.Comment,
-		Networks:        nfsStringList(resp.Networks),
-		Hosts:           nfsStringList(resp.Hosts),
+		Networks:        stringList(resp.Networks),
+		Hosts:           stringList(resp.Hosts),
 		ReadOnly:        resp.RO,
 		MaprootUser:     resp.MaprootUser,
 		MaprootGroup:    resp.MaprootGroup,
 		MapallUser:      resp.MapallUser,
 		MapallGroup:     resp.MapallGroup,
-		Security:        nfsStringList(resp.Security),
+		Security:        stringList(resp.Security),
 		Enabled:         resp.Enabled,
 		ExposeSnapshots: resp.ExposeSnapshots,
 		Locked:          resp.Locked,
 	}
-}
-
-// isNFSNotFoundError reports whether err is the API's ENOENT signal for a
-// missing instance. Only a provable ENOENT counts: generic prose such as the
-// JSON-RPC "Method does not exist" reply must surface as a real error rather
-// than being mistaken for a deleted share.
-func isNFSNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	var rpcErr *client.JSONRPCError
-	if errors.As(err, &rpcErr) {
-		if rpcErr.Data == nil {
-			return false
-		}
-		return rpcErr.Data.Error == errnoENOENT || strings.Contains(rpcErr.Data.Reason, "[ENOENT]")
-	}
-
-	return strings.Contains(err.Error(), "[ENOENT]")
 }

@@ -13,16 +13,17 @@ type TrueNASServices struct {
 	// Remove this field once all resources use typed service methods.
 	Client client.Client
 
-	App        truenas.AppServiceAPI
-	CloudSync  truenas.CloudSyncServiceAPI
-	Cron       truenas.CronServiceAPI
-	Dataset    truenas.DatasetServiceAPI
-	Filesystem truenas.FilesystemServiceAPI
-	Service    SystemServicesAPI
-	SharingNFS SharingNFSServiceAPI
-	Snapshot   truenas.SnapshotServiceAPI
-	Virt       truenas.VirtServiceAPI
-	VM         truenas.VMServiceAPI
+	App          truenas.AppServiceAPI
+	CloudSync    truenas.CloudSyncServiceAPI
+	Cron         truenas.CronServiceAPI
+	Dataset      truenas.DatasetServiceAPI
+	Filesystem   truenas.FilesystemServiceAPI
+	Service      SystemServicesAPI
+	SharingNFS   SharingNFSServiceAPI
+	Snapshot     truenas.SnapshotServiceAPI
+	SnapshotTask SnapshotTaskServiceAPI
+	Virt         truenas.VirtServiceAPI
+	VM           truenas.VMServiceAPI
 
 	// Group and User are implemented in this package because truenas-go does
 	// not yet cover the group.* and user.* namespaces.

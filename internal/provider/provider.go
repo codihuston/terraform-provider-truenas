@@ -375,19 +375,20 @@ func (p *TrueNASProvider) Configure(ctx context.Context, req provider.ConfigureR
 	// Build service registry
 	version := finalClient.Version()
 	svc := &services.TrueNASServices{
-		Client:     finalClient,
-		App:        truenas.NewAppService(finalClient, version),
-		CloudSync:  truenas.NewCloudSyncService(finalClient, version),
-		Cron:       truenas.NewCronService(finalClient, version),
-		Dataset:    truenas.NewDatasetService(finalClient, version),
-		Filesystem: truenas.NewFilesystemService(finalClient, version),
-		Service:    services.NewSystemServices(finalClient),
-		SharingNFS: services.NewSharingNFSService(finalClient),
-		Snapshot:   truenas.NewSnapshotService(finalClient, version),
-		Virt:       truenas.NewVirtService(finalClient, version),
-		VM:         truenas.NewVMService(finalClient, version),
-		Group:      services.NewGroupService(finalClient),
-		User:       services.NewUserService(finalClient),
+		Client:       finalClient,
+		App:          truenas.NewAppService(finalClient, version),
+		CloudSync:    truenas.NewCloudSyncService(finalClient, version),
+		Cron:         truenas.NewCronService(finalClient, version),
+		Dataset:      truenas.NewDatasetService(finalClient, version),
+		Filesystem:   truenas.NewFilesystemService(finalClient, version),
+		Service:      services.NewSystemServices(finalClient),
+		SharingNFS:   services.NewSharingNFSService(finalClient),
+		Snapshot:     truenas.NewSnapshotService(finalClient, version),
+		SnapshotTask: services.NewSnapshotTaskService(finalClient),
+		Virt:         truenas.NewVirtService(finalClient, version),
+		VM:           truenas.NewVMService(finalClient, version),
+		Group:        services.NewGroupService(finalClient),
+		User:         services.NewUserService(finalClient),
 	}
 
 	resp.DataSourceData = svc
@@ -416,6 +417,7 @@ func (p *TrueNASProvider) Resources(ctx context.Context) []func() resource.Resou
 		resources.NewCronJobResource,
 		resources.NewServiceResource,
 		resources.NewShareNFSResource,
+		resources.NewSnapshotTaskResource,
 		resources.NewVirtConfigResource,
 		resources.NewVirtInstanceResource,
 		resources.NewAppRegistryResource,

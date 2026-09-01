@@ -19,9 +19,9 @@ const (
 	envHost               = "TRUENAS_HOST"
 	envAPIKey             = "TRUENAS_API_KEY"
 	envAPIUser            = "TRUENAS_API_USER"
+	envSSHUser            = "TRUENAS_SSH_USER"
 	envSSHPrivateKey      = "TRUENAS_SSH_PRIVATE_KEY"
 	envSSHHostFingerprint = "TRUENAS_SSH_HOST_KEY_FINGERPRINT"
-	envSSHUser            = "TRUENAS_SSH_USER"
 	envPool               = "TRUENAS_ACC_POOL"
 )
 
