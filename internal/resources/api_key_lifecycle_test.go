@@ -3,6 +3,8 @@ package resources_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"regexp"
 	"sync"
 	"testing"
@@ -143,6 +145,21 @@ func lifecycleProviderFactories(f *fakeAPIKeyServer) map[string]func() (tfprotov
 
 var regexpInvalidTimestamp = regexp.MustCompile(`Invalid RFC 3339 Timestamp`)
 
+// requireTerraformCLI points the harness at the local terraform binary, since
+// these tests drive the real CLI rather than a live appliance.
+func requireTerraformCLI(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("TF_ACC_TERRAFORM_PATH") != "" {
+		return
+	}
+	path, err := exec.LookPath("terraform")
+	if err != nil {
+		t.Skip("terraform CLI not available")
+	}
+	t.Setenv("TF_ACC_TERRAFORM_PATH", path)
+}
+
 const fakeAPIKeySecret = "1-amfpg5iQSKI5rClsylOGH09wZnCvcmsKUJdGxu9yUddRkQWewAW21fgLwdowOiVy"
 
 // TestAPIKeyResourceLifecycle drives truenas_api_key through the real terraform
@@ -150,6 +167,8 @@ const fakeAPIKeySecret = "1-amfpg5iQSKI5rClsylOGH09wZnCvcmsKUJdGxu9yUddRkQWewAW2
 // rename keeps it, an expiry written with a UTC offset survives the
 // consistency check, and destroy removes the key server-side.
 func TestAPIKeyResourceLifecycle(t *testing.T) {
+	requireTerraformCLI(t)
+
 	f := newFakeAPIKeyServer()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -285,6 +304,8 @@ resource "terraform_data" "consumer" {
 // is returned by the creating apply, leaves state at the next refresh, and can
 // only come back by issuing a new key.
 func TestAPIKeyResourceStoreKeyLifecycle(t *testing.T) {
+	requireTerraformCLI(t)
+
 	f := newFakeAPIKeyServer()
 
 	const unstoredConfig = `
@@ -346,6 +367,8 @@ resource "truenas_api_key" "test" {
 // TestAPIKeyResourceInvalidExpiry checks that a malformed expiry is rejected at
 // plan time, before anything reaches the server.
 func TestAPIKeyResourceInvalidExpiry(t *testing.T) {
+	requireTerraformCLI(t)
+
 	f := newFakeAPIKeyServer()
 
 	resource.UnitTest(t, resource.TestCase{
