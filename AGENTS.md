@@ -27,6 +27,7 @@ Run them with `mise run test-acc` after exporting:
 | `TRUENAS_API_KEY` | API key for the WebSocket transport |
 | `TRUENAS_API_USER` | User the API key belongs to (default `root`) |
 | `TRUENAS_SSH_PRIVATE_KEY` | SSH private key **contents** (the provider requires an SSH block even in WebSocket mode) |
+| `TRUENAS_SSH_USER` | SSH user the key belongs to (default `root`) |
 | `TRUENAS_SSH_HOST_KEY_FINGERPRINT` | Host key fingerprint — must match the algorithm the client negotiates (usually ECDSA, not ED25519); get all of them with `ssh-keyscan <host> \| ssh-keygen -lf -` |
 | `TRUENAS_ACC_POOL` | Pool to create test datasets in (default `tank`) |
 

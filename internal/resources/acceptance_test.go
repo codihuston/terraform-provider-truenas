@@ -21,6 +21,7 @@ const (
 	envAPIUser            = "TRUENAS_API_USER"
 	envSSHPrivateKey      = "TRUENAS_SSH_PRIVATE_KEY"
 	envSSHHostFingerprint = "TRUENAS_SSH_HOST_KEY_FINGERPRINT"
+	envSSHUser            = "TRUENAS_SSH_USER"
 	envPool               = "TRUENAS_ACC_POOL"
 )
 
@@ -50,6 +51,15 @@ func testAccAPIUser() string {
 	return "root"
 }
 
+// testAccSSHUser returns the user the SSH transport authenticates as. The
+// provider defaults to root, which not every appliance permits.
+func testAccSSHUser() string {
+	if user := os.Getenv(envSSHUser); user != "" {
+		return user
+	}
+	return "root"
+}
+
 // testAccPool returns the pool acceptance-test resources are created in.
 func testAccPool() string {
 	if pool := os.Getenv(envPool); pool != "" {
@@ -73,13 +83,14 @@ provider "truenas" {
   }
 
   ssh {
+    user                 = %[6]q
     private_key          = <<-EOK
 %[3]s
     EOK
     host_key_fingerprint = %[4]q
   }
 }
-`, os.Getenv(envHost), os.Getenv(envAPIKey), os.Getenv(envSSHPrivateKey), os.Getenv(envSSHHostFingerprint), testAccAPIUser())
+`, os.Getenv(envHost), os.Getenv(envAPIKey), os.Getenv(envSSHPrivateKey), os.Getenv(envSSHHostFingerprint), testAccAPIUser(), testAccSSHUser())
 }
 
 // The acceptance target is dialled at most once per test binary: every
@@ -126,6 +137,7 @@ func testAccClient(t *testing.T) client.Client {
 func dialTestAccClient() {
 	sshClient, err := client.NewSSHClient(&client.SSHConfig{
 		Host:               os.Getenv(envHost),
+		User:               testAccSSHUser(),
 		PrivateKey:         os.Getenv(envSSHPrivateKey),
 		HostKeyFingerprint: os.Getenv(envSSHHostFingerprint),
 	})
