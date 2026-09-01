@@ -222,6 +222,21 @@ func TestUserService_Get_NotFound(t *testing.T) {
 	}
 }
 
+func TestUserService_Get_NotFound_RPCErrorWithoutData(t *testing.T) {
+	caller := &recordingCaller{err: &client.JSONRPCError{
+		Code:    client.ErrCodeTrueNASCall,
+		Message: "[ENOENT] None: User 99999 does not exist",
+	}}
+
+	user, err := NewUserService(caller).Get(context.Background(), 99999)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if user != nil {
+		t.Errorf("expected a missing user to map to nil, got %+v", user)
+	}
+}
+
 func TestUserService_Get_Error(t *testing.T) {
 	caller := &recordingCaller{err: errors.New("connection refused")}
 

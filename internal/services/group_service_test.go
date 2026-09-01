@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/deevus/truenas-go/client"
 )
 
 // groupResponseJSON is a group.get_instance payload from TrueNAS SCALE 25.10.
@@ -120,6 +122,21 @@ func TestGroupService_Get(t *testing.T) {
 
 func TestGroupService_Get_NotFound(t *testing.T) {
 	caller := &recordingCaller{err: errors.New("[ENOENT] None: Group 99999 does not exist")}
+
+	group, err := NewGroupService(caller).Get(context.Background(), 99999)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if group != nil {
+		t.Errorf("expected a missing group to map to nil, got %+v", group)
+	}
+}
+
+func TestGroupService_Get_NotFound_RPCErrorWithoutData(t *testing.T) {
+	caller := &recordingCaller{err: &client.JSONRPCError{
+		Code:    client.ErrCodeTrueNASCall,
+		Message: "[ENOENT] None: Group 99999 does not exist",
+	}}
 
 	group, err := NewGroupService(caller).Get(context.Background(), 99999)
 	if err != nil {

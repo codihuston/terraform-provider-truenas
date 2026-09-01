@@ -12,9 +12,11 @@ import (
 const errnoENOENT = 2
 
 // isNotFoundError reports whether err is the API's ENOENT signal for a missing
-// instance. Only a provable ENOENT counts: generic prose such as the JSON-RPC
-// "Method does not exist" reply must surface as a real error rather than being
-// mistaken for a deleted object.
+// instance. ENOENT is detected structurally, via the error data's errno or
+// Reason, or via the "[ENOENT]" marker the API prefixes to the message when it
+// sends no data payload. Generic prose such as the JSON-RPC "Method does not
+// exist" reply is deliberately not treated as not-found: it must surface as a
+// real error rather than being mistaken for a deleted object.
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
@@ -23,7 +25,7 @@ func isNotFoundError(err error) bool {
 	var rpcErr *client.JSONRPCError
 	if errors.As(err, &rpcErr) {
 		if rpcErr.Data == nil {
-			return false
+			return strings.Contains(rpcErr.Message, "[ENOENT]")
 		}
 		return rpcErr.Data.Error == errnoENOENT || strings.Contains(rpcErr.Data.Reason, "[ENOENT]")
 	}

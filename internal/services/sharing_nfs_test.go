@@ -338,6 +338,14 @@ func TestIsNotFoundError(t *testing.T) {
 		}, true},
 		{"wrapped enoent rpc error", fmt.Errorf("get instance: %w", enoentRPCError()), true},
 		{"enoent marker", errors.New("[ENOENT] missing"), true},
+		{"enoent rpc message only", &client.JSONRPCError{
+			Code:    client.ErrCodeTrueNASCall,
+			Message: "[ENOENT] None: User 42 does not exist",
+		}, true},
+		{"rpc message without enoent", &client.JSONRPCError{
+			Code:    client.ErrCodeTrueNASCall,
+			Message: "User 42 does not exist",
+		}, false},
 		{"method does not exist", &client.JSONRPCError{Code: -32601, Message: "Method does not exist"}, false},
 		{"plain does not exist", errors.New("Entry does not exist"), false},
 		{"not found", errors.New("share not found"), false},

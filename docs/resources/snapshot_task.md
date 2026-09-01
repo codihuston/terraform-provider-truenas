@@ -78,6 +78,8 @@ resource "truenas_snapshot_task" "weekly" {
 
 > **Note:** `naming_schema` must include enough strftime time fields to give every run a distinct snapshot name; TrueNAS rejects a schema that could collide.
 
+> **Note:** A `schedule` `begin` later than its `end` defines a window that wraps past midnight, so `18:00` to `06:00` runs overnight.
+
 > **Note:** `exclude` is only accepted when `recursive` is `true`. TrueNAS rejects the combination on apply.
 
 > **Note:** Deleting a task leaves the snapshots it already took in place.
@@ -118,10 +120,10 @@ terraform import truenas_snapshot_task.example 1
 
 Optional:
 
-- `begin` (String) Start of the daily window in which the task may run, as "HH:MM".
+- `begin` (String) Start of the daily window in which the task may run, as "HH:MM". A begin later than end defines a window that wraps past midnight.
 - `dom` (String) Day of month (1-31 or cron expression).
 - `dow` (String) Day of week, 1 (Monday) to 7 (Sunday), or a cron expression.
-- `end` (String) End of the daily window in which the task may run, as "HH:MM".
+- `end` (String) End of the daily window in which the task may run, as "HH:MM". An end earlier than begin defines a window that wraps past midnight.
 - `hour` (String) Hour (0-23 or cron expression).
 - `minute` (String) Minute (0-59 or cron expression).
 - `month` (String) Month (1-12 or cron expression).

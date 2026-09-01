@@ -58,6 +58,8 @@ resource "truenas_snapshot_task" "weekly" {
 
 > **Note:** `naming_schema` must include enough strftime time fields to give every run a distinct snapshot name; TrueNAS rejects a schema that could collide.
 
+> **Note:** A `schedule` `begin` later than its `end` defines a window that wraps past midnight, so `18:00` to `06:00` runs overnight.
+
 > **Note:** `exclude` is only accepted when `recursive` is `true`. TrueNAS rejects the combination on apply.
 
 > **Note:** Deleting a task leaves the snapshots it already took in place.
