@@ -343,10 +343,6 @@ func TestShareNFSResource_Create_Success(t *testing.T) {
 	if len(capturedOpts.Security) != 1 || capturedOpts.Security[0] != "SYS" {
 		t.Errorf("unexpected security: %v", capturedOpts.Security)
 	}
-	if capturedOpts.Aliases != nil {
-		t.Errorf("expected aliases to be omitted from opts, got %v", capturedOpts.Aliases)
-	}
-
 	var data ShareNFSResourceModel
 	resp.State.Get(context.Background(), &data)
 	assertShareNFSState(t, data)
@@ -374,11 +370,6 @@ func TestShareNFSResource_Create_NullListsBecomeEmpty(t *testing.T) {
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
-	}
-
-	// aliases is read-only, so it is never populated from configuration.
-	if capturedOpts.Aliases != nil {
-		t.Errorf("expected aliases to be omitted from opts, got %v", capturedOpts.Aliases)
 	}
 
 	for name, got := range map[string][]string{

@@ -36,8 +36,7 @@ resource "truenas_share_nfs" "test" {
   comment = %[1]q
   ro      = %[2]t
 
-  hosts    = [%[3]s]
-  security = ["SYS"]
+  hosts = [%[3]s]
 %[4]s
 }
 `, comment, readOnly, strings.Join(quoted, ", "), extra)
@@ -150,7 +149,8 @@ func TestAccShareNFSResource(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and read back.
 			{
-				Config: testAccShareNFSConfig(dataset, "acc test share", false, []string{"10.0.0.10"}, ""),
+				Config: testAccShareNFSConfig(dataset, "acc test share", false, []string{"10.0.0.10"}, `
+  security = ["SYS"]`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckShareNFSExists(t, resourceName),
 					resource.TestCheckResourceAttr(resourceName, "comment", "acc test share"),
@@ -179,6 +179,7 @@ func TestAccShareNFSResource(t *testing.T) {
 			{
 				Config: testAccShareNFSConfig(dataset, "acc test share updated", true,
 					[]string{"10.0.0.10", "10.0.0.11"}, `
+  security      = ["SYS"]
   maproot_user  = "root"
   maproot_group = "root"`),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -197,10 +198,24 @@ func TestAccShareNFSResource(t *testing.T) {
 			// Clearing the mapping sends an explicit null.
 			{
 				Config: testAccShareNFSConfig(dataset, "acc test share updated", true,
-					[]string{"10.0.0.10", "10.0.0.11"}, ""),
+					[]string{"10.0.0.10", "10.0.0.11"}, `
+  security = ["SYS"]`),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckNoResourceAttr(resourceName, "maproot_user"),
 					testAccCheckShareNFSAttr(t, resourceName, "maproot_user", "<nil>"),
+				),
+			},
+			// Omitting security and expose_snapshots exercises the schema
+			// defaults against the live API.
+			{
+				Config: testAccShareNFSConfig(dataset, "acc test share defaults", false,
+					[]string{"10.0.0.10"}, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckShareNFSExists(t, resourceName),
+					resource.TestCheckResourceAttr(resourceName, "security.#", "0"),
+					resource.TestCheckResourceAttr(resourceName, "expose_snapshots", "false"),
+					testAccCheckShareNFSAttr(t, resourceName, "security", "[]"),
+					testAccCheckShareNFSAttr(t, resourceName, "expose_snapshots", false),
 				),
 			},
 		},

@@ -3,11 +3,17 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	truenas "github.com/deevus/truenas-go"
+	"github.com/deevus/truenas-go/client"
 )
+
+// errnoENOENT is the POSIX ENOENT value the API reports in JSON-RPC error data
+// when an instance does not exist.
+const errnoENOENT = 2
 
 // NFSShare is the user-facing representation of a TrueNAS NFS share
 // (the `sharing.nfs` API namespace).
@@ -35,7 +41,6 @@ type NFSShare struct {
 // All fields are always sent on create.
 type CreateNFSShareOpts struct {
 	Path            string
-	Aliases         []string
 	Comment         string
 	Networks        []string
 	Hosts           []string
@@ -162,7 +167,6 @@ func (s *SharingNFSService) Delete(ctx context.Context, id int64) error {
 func nfsOptsToParams(opts CreateNFSShareOpts) map[string]any {
 	return map[string]any{
 		"path":             opts.Path,
-		"aliases":          nfsStringList(opts.Aliases),
 		"comment":          opts.Comment,
 		"networks":         nfsStringList(opts.Networks),
 		"hosts":            nfsStringList(opts.Hosts),
@@ -207,14 +211,22 @@ func nfsShareFromResponse(resp nfsShareResponse) NFSShare {
 	}
 }
 
-// isNFSNotFoundError reports whether err indicates the share no longer exists.
+// isNFSNotFoundError reports whether err is the API's ENOENT signal for a
+// missing instance. Only a provable ENOENT counts: generic prose such as the
+// JSON-RPC "Method does not exist" reply must surface as a real error rather
+// than being mistaken for a deleted share.
 func isNFSNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "does not exist") ||
-		strings.Contains(msg, "[ENOENT]") ||
-		strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "no such instance")
+
+	var rpcErr *client.JSONRPCError
+	if errors.As(err, &rpcErr) {
+		if rpcErr.Data == nil {
+			return false
+		}
+		return rpcErr.Data.Error == errnoENOENT || strings.Contains(rpcErr.Data.Reason, "[ENOENT]")
+	}
+
+	return strings.Contains(err.Error(), "[ENOENT]")
 }

@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/deevus/truenas-go/client"
 )
 
 // fakeCaller is a minimal truenas.Caller test double.
@@ -127,15 +130,29 @@ func TestSharingNFSService_Create(t *testing.T) {
 	if params["ro"] != true {
 		t.Errorf("unexpected ro param: %v", params["ro"])
 	}
-	// nil slices must be sent as [] rather than null.
-	if !reflect.DeepEqual(params["aliases"], []string{}) {
-		t.Errorf("expected empty aliases param, got %v", params["aliases"])
+	// aliases is read-only and must never be submitted.
+	if _, ok := params["aliases"]; ok {
+		t.Error("expected no aliases param")
 	}
 	if params["mapall_user"] != (*string)(nil) {
 		t.Errorf("expected nil mapall_user param, got %v", params["mapall_user"])
 	}
 
 	assertShare(t, share)
+}
+
+// nil slices must be sent as [] rather than null, which the API rejects.
+func TestNFSOptsToParams_NilListsBecomeEmpty(t *testing.T) {
+	params := nfsOptsToParams(CreateNFSShareOpts{Path: "/mnt/tank/media"})
+
+	for _, key := range []string{"networks", "hosts", "security"} {
+		if !reflect.DeepEqual(params[key], []string{}) {
+			t.Errorf("expected empty %s param, got %v", key, params[key])
+		}
+	}
+	if _, ok := params["aliases"]; ok {
+		t.Error("expected no aliases param")
+	}
 }
 
 func TestSharingNFSService_Create_CallError(t *testing.T) {
@@ -172,7 +189,7 @@ func TestSharingNFSService_Get(t *testing.T) {
 }
 
 func TestSharingNFSService_Get_NotFound(t *testing.T) {
-	s := NewSharingNFSService(&fakeCaller{err: errors.New("[ENOENT] Entry does not exist")})
+	s := NewSharingNFSService(&fakeCaller{err: enoentRPCError()})
 
 	share, err := s.Get(context.Background(), 7)
 	if err != nil {
@@ -293,6 +310,19 @@ func TestSharingNFSService_Delete_Error(t *testing.T) {
 	}
 }
 
+// enoentRPCError reproduces the error the live API returns for a missing
+// instance: sharing.nfs.get_instance(99999).
+func enoentRPCError() *client.JSONRPCError {
+	return &client.JSONRPCError{
+		Code:    client.ErrCodeTrueNASCall,
+		Message: "[ENOENT] None: SharingNFS 99999 does not exist",
+		Data: &client.JSONRPCData{
+			Reason: "[ENOENT] None: SharingNFS 99999 does not exist",
+			Error:  2,
+		},
+	}
+}
+
 func TestIsNFSNotFoundError(t *testing.T) {
 	tests := []struct {
 		name string
@@ -300,10 +330,18 @@ func TestIsNFSNotFoundError(t *testing.T) {
 		want bool
 	}{
 		{"nil", nil, false},
-		{"does not exist", errors.New("Entry does not exist"), true},
-		{"enoent", errors.New("[ENOENT] missing"), true},
-		{"not found", errors.New("share not found"), true},
-		{"no such instance", errors.New("no such instance"), true},
+		{"enoent rpc error", enoentRPCError(), true},
+		{"enoent rpc errno only", &client.JSONRPCError{
+			Code:    client.ErrCodeTrueNASCall,
+			Message: "SharingNFS 99999 does not exist",
+			Data:    &client.JSONRPCData{Error: 2},
+		}, true},
+		{"wrapped enoent rpc error", fmt.Errorf("get instance: %w", enoentRPCError()), true},
+		{"enoent marker", errors.New("[ENOENT] missing"), true},
+		{"method does not exist", &client.JSONRPCError{Code: -32601, Message: "Method does not exist"}, false},
+		{"plain does not exist", errors.New("Entry does not exist"), false},
+		{"not found", errors.New("share not found"), false},
+		{"no such instance", errors.New("no such instance"), false},
 		{"unrelated", errors.New("connection refused"), false},
 	}
 

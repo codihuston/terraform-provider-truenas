@@ -1,6 +1,6 @@
 module github.com/deevus/terraform-provider-truenas
 
-go 1.25.8
+go 1.25.5
 
 require (
 	github.com/deevus/truenas-go v0.5.0
