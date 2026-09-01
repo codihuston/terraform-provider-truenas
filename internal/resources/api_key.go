@@ -96,7 +96,8 @@ func (r *APIKeyResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Description: "Whether to persist `key` in Terraform state. When `false`, the secret is " +
 					"readable only by resources in the same apply that creates the key, and is dropped " +
 					"from state on the next refresh; nothing can recover it afterwards. Setting this " +
-					"back to `true` forces a new API key, since that is the only way to obtain a secret.",
+					"back to `true` forces a new API key, since that is the only way to obtain a secret. " +
+					"For a key created with `store_key` set to `false`, this value must be known at plan time.",
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(true),
@@ -152,11 +153,31 @@ func (r *APIKeyResource) Schema(ctx context.Context, req resource.SchemaRequest,
 
 // requiresReplaceWhenStoringKeyAgain replaces the key when the plan switches
 // key storage back on: the secret exists only in the reply to a creation, so
-// an existing key can never start being stored. The planned value is what
-// matters, since it already carries the schema default for a config that
-// omits store_key.
+// an existing key can never start being stored. While storage is already on,
+// nothing replaces, so an unknown plan is harmless. While it is off, an unknown
+// plan is an error, because neither guess is safe. Otherwise the planned value
+// decides, since it already carries the schema default for a config that omits
+// store_key.
 func requiresReplaceWhenStoringKeyAgain(ctx context.Context, req planmodifier.BoolRequest, resp *boolplanmodifier.RequiresReplaceIfFuncResponse) {
-	resp.RequiresReplace = !req.StateValue.ValueBool() && req.PlanValue.ValueBool()
+	if req.StateValue.ValueBool() {
+		resp.RequiresReplace = false
+		return
+	}
+
+	if req.PlanValue.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("store_key"),
+			"Unknown store_key Value",
+			"This API key was created with store_key set to false, so its secret is no longer in state. "+
+				"Whether storing the key again requires issuing a new one cannot be decided while store_key "+
+				"is unknown at plan time: assuming it stays false would leave a key whose secret can never be "+
+				"recovered, and assuming it becomes true would destroy a key that is still valid. "+
+				"Set store_key to a value that is known at plan time.",
+		)
+		return
+	}
+
+	resp.RequiresReplace = req.PlanValue.ValueBool()
 }
 
 func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

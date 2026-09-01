@@ -57,6 +57,8 @@ resource "vault_kv_secret_v2" "truenas" {
 
 > **Note:** Because the secret can only be captured at creation, changing `store_key` from `false` to `true` destroys and recreates the key. Anything still using the old secret stops authenticating.
 
+> **Note:** For a key created with `store_key = false`, `store_key` must be known at plan time. Terraform cannot decide whether storing the key again requires issuing a new one while the value is unknown, so planning fails with an error.
+
 > **Note:** `username` cannot be changed on an existing key. Changing it destroys and recreates the key.
 
 > **Note:** TrueNAS revokes keys on its own, for instance once `expires_at` passes. Such a key still exists and stays in state, with `revoked` set to `true` and `revoked_reason` explaining why.
@@ -82,7 +84,7 @@ The secret is not part of an import: `key` reads as `null` on an imported key.
 ### Optional
 
 - `expires_at` (String) RFC 3339 timestamp at which the key stops authenticating, for example `2035-01-02T15:04:05Z`. Omit for a key that never expires.
-- `store_key` (Boolean) Whether to persist `key` in Terraform state. When `false`, the secret is readable only by resources in the same apply that creates the key, and is dropped from state on the next refresh; nothing can recover it afterwards. Setting this back to `true` forces a new API key, since that is the only way to obtain a secret.
+- `store_key` (Boolean) Whether to persist `key` in Terraform state. When `false`, the secret is readable only by resources in the same apply that creates the key, and is dropped from state on the next refresh; nothing can recover it afterwards. Setting this back to `true` forces a new API key, since that is the only way to obtain a secret. For a key created with `store_key` set to `false`, this value must be known at plan time.
 
 ### Read-Only
 

@@ -44,6 +44,8 @@ resource "vault_kv_secret_v2" "truenas" {
 
 > **Note:** Because the secret can only be captured at creation, changing `store_key` from `false` to `true` destroys and recreates the key. Anything still using the old secret stops authenticating.
 
+> **Note:** For a key created with `store_key = false`, `store_key` must be known at plan time. Terraform cannot decide whether storing the key again requires issuing a new one while the value is unknown, so planning fails with an error.
+
 > **Note:** `username` cannot be changed on an existing key. Changing it destroys and recreates the key.
 
 > **Note:** TrueNAS revokes keys on its own, for instance once `expires_at` passes. Such a key still exists and stays in state, with `revoked` set to `true` and `revoked_reason` explaining why.

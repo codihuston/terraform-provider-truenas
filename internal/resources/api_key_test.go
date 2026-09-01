@@ -857,16 +857,19 @@ func TestAPIKeyResource_Schema_KeyUsesStateForUnknown(t *testing.T) {
 
 func TestRequiresReplaceWhenStoringKeyAgain(t *testing.T) {
 	tests := map[string]struct {
-		state  bool
-		config types.Bool
-		plan   bool
-		want   bool
+		state   bool
+		config  types.Bool
+		plan    types.Bool
+		want    bool
+		wantErr bool
 	}{
-		"storage turned back on":        {state: false, config: types.BoolValue(true), plan: true, want: true},
-		"storage turned off":            {state: true, config: types.BoolValue(false), plan: false, want: false},
-		"storage stays on":              {state: true, config: types.BoolValue(true), plan: true, want: false},
-		"storage stays off":             {state: false, config: types.BoolValue(false), plan: false, want: false},
-		"store_key dropped from config": {state: false, config: types.BoolNull(), plan: true, want: true},
+		"storage turned back on":        {state: false, config: types.BoolValue(true), plan: types.BoolValue(true), want: true},
+		"storage turned off":            {state: true, config: types.BoolValue(false), plan: types.BoolValue(false), want: false},
+		"storage stays on":              {state: true, config: types.BoolValue(true), plan: types.BoolValue(true), want: false},
+		"storage stays off":             {state: false, config: types.BoolValue(false), plan: types.BoolValue(false), want: false},
+		"store_key dropped from config": {state: false, config: types.BoolNull(), plan: types.BoolValue(true), want: true},
+		"unknown while storing":         {state: true, config: types.BoolUnknown(), plan: types.BoolUnknown(), want: false},
+		"unknown while not storing":     {state: false, config: types.BoolUnknown(), plan: types.BoolUnknown(), want: false, wantErr: true},
 	}
 
 	for name, tt := range tests {
@@ -875,9 +878,12 @@ func TestRequiresReplaceWhenStoringKeyAgain(t *testing.T) {
 			requiresReplaceWhenStoringKeyAgain(context.Background(), planmodifier.BoolRequest{
 				StateValue:  types.BoolValue(tt.state),
 				ConfigValue: tt.config,
-				PlanValue:   types.BoolValue(tt.plan),
+				PlanValue:   tt.plan,
 			}, resp)
 
+			if got := resp.Diagnostics.HasError(); got != tt.wantErr {
+				t.Errorf("expected error %v, got diagnostics %v", tt.wantErr, resp.Diagnostics)
+			}
 			if resp.RequiresReplace != tt.want {
 				t.Errorf("expected %v, got %v", tt.want, resp.RequiresReplace)
 			}
