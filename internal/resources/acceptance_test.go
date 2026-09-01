@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,26 +82,66 @@ provider "truenas" {
 `, os.Getenv(envHost), os.Getenv(envAPIKey), os.Getenv(envSSHPrivateKey), os.Getenv(envSSHHostFingerprint), testAccAPIUser())
 }
 
-// testAccClient builds a client against the acceptance target so tests can
-// verify server-side state directly, independent of Terraform state.
+// The acceptance target is dialled at most once per test binary: every
+// server-side check shares one connection instead of opening an SSH session
+// each time.
+var (
+	testAccClientOnce sync.Once
+	testAccSSHClient  *client.SSHClient
+	testAccWSClient   *client.WebSocketClient
+	testAccClientErr  error
+)
+
+// TestMain closes the shared acceptance client, if one was ever created, after
+// all tests have run. Nothing connects here, so a run with TF_ACC unset never
+// reaches the server.
+func TestMain(m *testing.M) {
+	code := m.Run()
+
+	if testAccWSClient != nil {
+		_ = testAccWSClient.Close()
+	}
+	if testAccSSHClient != nil {
+		_ = testAccSSHClient.Close()
+	}
+
+	os.Exit(code)
+}
+
+// testAccClient returns the shared client for the acceptance target so tests
+// can verify server-side state directly, independent of Terraform state.
 func testAccClient(t *testing.T) client.Client {
 	t.Helper()
 
+	testAccClientOnce.Do(dialTestAccClient)
+
+	if testAccClientErr != nil {
+		t.Fatalf("unable to reach acceptance target: %s", testAccClientErr)
+	}
+	return testAccWSClient
+}
+
+// dialTestAccClient establishes the SSH and WebSocket connections once,
+// retaining both so TestMain can close them.
+func dialTestAccClient() {
 	sshClient, err := client.NewSSHClient(&client.SSHConfig{
 		Host:               os.Getenv(envHost),
 		PrivateKey:         os.Getenv(envSSHPrivateKey),
 		HostKeyFingerprint: os.Getenv(envSSHHostFingerprint),
 	})
 	if err != nil {
-		t.Fatalf("unable to create SSH client: %s", err)
+		testAccClientErr = fmt.Errorf("create SSH client: %w", err)
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	if err := sshClient.Connect(ctx); err != nil {
-		t.Fatalf("unable to connect to %s: %s", os.Getenv(envHost), err)
+		testAccClientErr = fmt.Errorf("connect to %s: %w", os.Getenv(envHost), err)
+		return
 	}
+	testAccSSHClient = sshClient
 
 	wsClient, err := client.NewWebSocketClient(client.WebSocketConfig{
 		Host:               os.Getenv(envHost),
@@ -110,14 +151,13 @@ func testAccClient(t *testing.T) client.Client {
 		Fallback:           sshClient,
 	})
 	if err != nil {
-		t.Fatalf("unable to create WebSocket client: %s", err)
+		testAccClientErr = fmt.Errorf("create WebSocket client: %w", err)
+		return
 	}
 
 	if err := wsClient.Connect(ctx); err != nil {
-		t.Fatalf("unable to connect WebSocket client: %s", err)
+		testAccClientErr = fmt.Errorf("connect WebSocket client: %w", err)
+		return
 	}
-
-	t.Cleanup(func() { _ = wsClient.Close() })
-
-	return wsClient
+	testAccWSClient = wsClient
 }
