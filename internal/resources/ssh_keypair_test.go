@@ -6,9 +6,12 @@ import (
 	"testing"
 
 	"github.com/deevus/terraform-provider-truenas/internal/services"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -142,8 +145,28 @@ func TestSSHKeypairResource_Schema_RejectsEmptyPrivateKey(t *testing.T) {
 	s := resourceSchema(t, NewSSHKeypairResource())
 
 	privateKey := s.Attributes["private_key"].(rschema.StringAttribute)
-	if len(privateKey.Validators) == 0 {
-		t.Fatal("expected private_key to be validated")
+
+	for _, tc := range []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "empty", value: "", wantErr: true},
+		{name: "key material", value: testPrivateKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &validator.StringResponse{}
+			for _, v := range privateKey.Validators {
+				v.ValidateString(context.Background(), validator.StringRequest{
+					Path:        path.Root("private_key"),
+					ConfigValue: types.StringValue(tc.value),
+				}, resp)
+			}
+
+			if got := resp.Diagnostics.HasError(); got != tc.wantErr {
+				t.Errorf("expected error %v, got %v: %v", tc.wantErr, got, resp.Diagnostics)
+			}
+		})
 	}
 }
 

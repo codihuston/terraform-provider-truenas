@@ -101,8 +101,12 @@ func (r *SSHCredentialResource) Schema(ctx context.Context, req resource.SchemaR
 				Description: "Public host keys the remote host is trusted to present, one per line, " +
 					"in `known_hosts` format without the leading host field. Leave it unset to " +
 					"have TrueNAS scan the host once, when the connection is created, and trust " +
-					"whatever answers — the connection is not re-verified afterwards, so a host " +
-					"key that changes later is neither detected nor reported as drift.",
+					"whatever answers — an unchanged host is not re-verified afterwards, so a host " +
+					"key that changes later is neither detected nor reported as drift. Changing " +
+					"`host` or `port` while this attribute is unset scans afresh, which is a new " +
+					"trust-on-first-use event with the same implications as the first: the new host " +
+					"is trusted on whatever answers at that moment, and nothing verifies it is the " +
+					"intended machine.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
@@ -130,7 +134,7 @@ func (r *SSHCredentialResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	opts, ok := r.buildSSHCredentialOpts(ctx, &data, &resp.Diagnostics)
+	opts, ok := r.buildSSHCredentialOpts(ctx, &data, data.RemoteHostKey.IsUnknown(), &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -185,9 +189,11 @@ func (r *SSHCredentialResource) Read(ctx context.Context, req resource.ReadReque
 func (r *SSHCredentialResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var state SSHCredentialResourceModel
 	var plan SSHCredentialResourceModel
+	var config SSHCredentialResourceModel
 
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -197,7 +203,15 @@ func (r *SSHCredentialResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	opts, ok := r.buildSSHCredentialOpts(ctx, &plan, &resp.Diagnostics)
+	// The stored host key must always belong to the recorded host. When the
+	// provider owns the key — the configuration leaves it out — moving the
+	// connection to another host or port means scanning that host afresh
+	// rather than resubmitting the key scanned for the previous one.
+	unmanagedHostKey := config.RemoteHostKey.IsNull()
+	movedHost := !plan.Host.Equal(state.Host) || !plan.Port.Equal(state.Port)
+	scan := plan.RemoteHostKey.IsUnknown() || (unmanagedHostKey && movedHost)
+
+	opts, ok := r.buildSSHCredentialOpts(ctx, &plan, scan, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -238,8 +252,8 @@ func (r *SSHCredentialResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 // buildSSHCredentialOpts builds typed options from the resource model,
-// discovering the remote host key when the configuration leaves it out.
-func (r *SSHCredentialResource) buildSSHCredentialOpts(ctx context.Context, data *SSHCredentialResourceModel, diags *diag.Diagnostics) (services.CreateSSHCredentialOpts, bool) {
+// discovering the remote host key when the caller asks for a scan.
+func (r *SSHCredentialResource) buildSSHCredentialOpts(ctx context.Context, data *SSHCredentialResourceModel, scan bool, diags *diag.Diagnostics) (services.CreateSSHCredentialOpts, bool) {
 	var opts services.CreateSSHCredentialOpts
 
 	privateKeyID, err := strconv.ParseInt(data.PrivateKeyID.ValueString(), 10, 64)
@@ -261,7 +275,7 @@ func (r *SSHCredentialResource) buildSSHCredentialOpts(ctx context.Context, data
 		ConnectTimeout: data.ConnectTimeout.ValueInt64(),
 	}
 
-	if !data.RemoteHostKey.IsUnknown() {
+	if !scan {
 		return opts, true
 	}
 

@@ -48,6 +48,15 @@ func testSSHCredentialAttrs() map[string]tftypes.Value {
 	}
 }
 
+// sshCredentialUnmanagedHostKeyAttrs is the configuration behind
+// testSSHCredentialAttrs when remote_host_key is left to the provider: the
+// planned value is carried over from state, but the config value is null.
+func sshCredentialUnmanagedHostKeyAttrs() map[string]tftypes.Value {
+	return withAttrs(testSSHCredentialAttrs(), map[string]tftypes.Value{
+		"remote_host_key": tftypes.NewValue(tftypes.String, nil),
+	})
+}
+
 func assertSSHCredentialState(t *testing.T, data SSHCredentialResourceModel) {
 	t.Helper()
 
@@ -467,11 +476,15 @@ func TestSSHCredentialResource_Update_Success(t *testing.T) {
 	plan := objectValue(t, s, withAttrs(testSSHCredentialAttrs(), map[string]tftypes.Value{
 		"username": tftypes.NewValue(tftypes.String, "backup"),
 	}))
+	config := objectValue(t, s, withAttrs(sshCredentialUnmanagedHostKeyAttrs(), map[string]tftypes.Value{
+		"username": tftypes.NewValue(tftypes.String, "backup"),
+	}))
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
 	r.Update(context.Background(), resource.UpdateRequest{
-		State: tfsdk.State{Schema: s, Raw: state},
-		Plan:  tfsdk.Plan{Schema: s, Raw: plan},
+		State:  tfsdk.State{Schema: s, Raw: state},
+		Plan:   tfsdk.Plan{Schema: s, Raw: plan},
+		Config: tfsdk.Config{Schema: s, Raw: config},
 	}, resp)
 
 	if resp.Diagnostics.HasError() {
@@ -497,6 +510,158 @@ func TestSSHCredentialResource_Update_Success(t *testing.T) {
 	}
 }
 
+// A connection that moves to another host must not keep the host key scanned
+// for the previous one: the provider owns the key, so it scans the new host.
+func TestSSHCredentialResource_Update_RescansWhenHostMoves(t *testing.T) {
+	const scannedKey = "ssh-ed25519 AAAAC3NzMOVED"
+
+	cases := []struct {
+		name    string
+		changed map[string]tftypes.Value
+		host    string
+		port    int64
+	}{
+		{
+			name:    "host changed",
+			changed: map[string]tftypes.Value{"host": tftypes.NewValue(tftypes.String, "moved.example.com")},
+			host:    "moved.example.com",
+			port:    2222,
+		},
+		{
+			name:    "port changed",
+			changed: map[string]tftypes.Value{"port": tftypes.NewValue(tftypes.Number, 2022)},
+			host:    "backup.example.com",
+			port:    2022,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured services.UpdateSSHCredentialOpts
+			var scan services.ScanRemoteHostKeyOpts
+			scanned := false
+
+			r := sshCredentialResource(&services.MockKeychainCredentialService{
+				UpdateSSHCredentialFunc: func(ctx context.Context, id int64, opts services.UpdateSSHCredentialOpts) (*services.SSHCredential, error) {
+					captured = opts
+					return testSSHCredential(), nil
+				},
+				ScanRemoteHostKeyFunc: func(ctx context.Context, opts services.ScanRemoteHostKeyOpts) (string, error) {
+					scanned = true
+					scan = opts
+					return scannedKey, nil
+				},
+			})
+
+			s := resourceSchema(t, r)
+			state := objectValue(t, s, testSSHCredentialAttrs())
+			plan := objectValue(t, s, withAttrs(testSSHCredentialAttrs(), tc.changed))
+			config := objectValue(t, s, withAttrs(sshCredentialUnmanagedHostKeyAttrs(), tc.changed))
+
+			resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
+			r.Update(context.Background(), resource.UpdateRequest{
+				State:  tfsdk.State{Schema: s, Raw: state},
+				Plan:   tfsdk.Plan{Schema: s, Raw: plan},
+				Config: tfsdk.Config{Schema: s, Raw: config},
+			}, resp)
+
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+			}
+			if !scanned {
+				t.Fatal("expected a host key scan when the connection moves")
+			}
+			if scan.Host != tc.host || scan.Port != tc.port {
+				t.Errorf("expected a scan of %s:%d, got %s:%d", tc.host, tc.port, scan.Host, scan.Port)
+			}
+			if scan.ConnectTimeout != 20 {
+				t.Errorf("expected the planned connect timeout 20, got %d", scan.ConnectTimeout)
+			}
+			if captured.RemoteHostKey != scannedKey {
+				t.Errorf("expected the freshly scanned key to be submitted, got %q", captured.RemoteHostKey)
+			}
+		})
+	}
+}
+
+// A configured host key belongs to the user, so moving the connection submits
+// it verbatim rather than replacing it with a scan.
+func TestSSHCredentialResource_Update_KeepsConfiguredHostKeyWhenHostMoves(t *testing.T) {
+	var captured services.UpdateSSHCredentialOpts
+	scanned := false
+
+	r := sshCredentialResource(&services.MockKeychainCredentialService{
+		UpdateSSHCredentialFunc: func(ctx context.Context, id int64, opts services.UpdateSSHCredentialOpts) (*services.SSHCredential, error) {
+			captured = opts
+			return testSSHCredential(), nil
+		},
+		ScanRemoteHostKeyFunc: func(ctx context.Context, opts services.ScanRemoteHostKeyOpts) (string, error) {
+			scanned = true
+			return "ssh-ed25519 AAAAC3NzSCANNED", nil
+		},
+	})
+
+	moved := map[string]tftypes.Value{"host": tftypes.NewValue(tftypes.String, "moved.example.com")}
+
+	s := resourceSchema(t, r)
+	state := objectValue(t, s, testSSHCredentialAttrs())
+	value := objectValue(t, s, withAttrs(testSSHCredentialAttrs(), moved))
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
+	r.Update(context.Background(), resource.UpdateRequest{
+		State:  tfsdk.State{Schema: s, Raw: state},
+		Plan:   tfsdk.Plan{Schema: s, Raw: value},
+		Config: tfsdk.Config{Schema: s, Raw: value},
+	}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+	if scanned {
+		t.Error("expected no host key scan when remote_host_key is configured")
+	}
+	if captured.RemoteHostKey != testRemoteHostKey {
+		t.Errorf("expected the configured host key to be submitted, got %q", captured.RemoteHostKey)
+	}
+}
+
+// A failed re-scan fails the apply rather than storing a key that belongs to
+// the host the connection has just left.
+func TestSSHCredentialResource_Update_ScanError(t *testing.T) {
+	updated := false
+
+	r := sshCredentialResource(&services.MockKeychainCredentialService{
+		UpdateSSHCredentialFunc: func(ctx context.Context, id int64, opts services.UpdateSSHCredentialOpts) (*services.SSHCredential, error) {
+			updated = true
+			return testSSHCredential(), nil
+		},
+		ScanRemoteHostKeyFunc: func(ctx context.Context, opts services.ScanRemoteHostKeyOpts) (string, error) {
+			return "", errors.New("connection refused")
+		},
+	})
+
+	moved := map[string]tftypes.Value{"host": tftypes.NewValue(tftypes.String, "moved.example.com")}
+
+	s := resourceSchema(t, r)
+	state := objectValue(t, s, testSSHCredentialAttrs())
+	plan := objectValue(t, s, withAttrs(testSSHCredentialAttrs(), moved))
+	config := objectValue(t, s, withAttrs(sshCredentialUnmanagedHostKeyAttrs(), moved))
+
+	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
+	r.Update(context.Background(), resource.UpdateRequest{
+		State:  tfsdk.State{Schema: s, Raw: state},
+		Plan:   tfsdk.Plan{Schema: s, Raw: plan},
+		Config: tfsdk.Config{Schema: s, Raw: config},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected error when the host key scan fails")
+	}
+	if updated {
+		t.Error("expected no update when the host key scan fails")
+	}
+}
+
 func TestSSHCredentialResource_Update_APIError(t *testing.T) {
 	r := sshCredentialResource(&services.MockKeychainCredentialService{
 		UpdateSSHCredentialFunc: func(ctx context.Context, id int64, opts services.UpdateSSHCredentialOpts) (*services.SSHCredential, error) {
@@ -509,8 +674,9 @@ func TestSSHCredentialResource_Update_APIError(t *testing.T) {
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
 	r.Update(context.Background(), resource.UpdateRequest{
-		State: tfsdk.State{Schema: s, Raw: value},
-		Plan:  tfsdk.Plan{Schema: s, Raw: value},
+		State:  tfsdk.State{Schema: s, Raw: value},
+		Plan:   tfsdk.Plan{Schema: s, Raw: value},
+		Config: tfsdk.Config{Schema: s, Raw: value},
 	}, resp)
 
 	if !resp.Diagnostics.HasError() {
@@ -528,8 +694,9 @@ func TestSSHCredentialResource_Update_InvalidID(t *testing.T) {
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
 	r.Update(context.Background(), resource.UpdateRequest{
-		State: tfsdk.State{Schema: s, Raw: value},
-		Plan:  tfsdk.Plan{Schema: s, Raw: value},
+		State:  tfsdk.State{Schema: s, Raw: value},
+		Plan:   tfsdk.Plan{Schema: s, Raw: value},
+		Config: tfsdk.Config{Schema: s, Raw: value},
 	}, resp)
 
 	if !resp.Diagnostics.HasError() {
@@ -548,8 +715,9 @@ func TestSSHCredentialResource_Update_InvalidPrivateKeyID(t *testing.T) {
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
 	r.Update(context.Background(), resource.UpdateRequest{
-		State: tfsdk.State{Schema: s, Raw: state},
-		Plan:  tfsdk.Plan{Schema: s, Raw: plan},
+		State:  tfsdk.State{Schema: s, Raw: state},
+		Plan:   tfsdk.Plan{Schema: s, Raw: plan},
+		Config: tfsdk.Config{Schema: s, Raw: plan},
 	}, resp)
 
 	if !resp.Diagnostics.HasError() {
@@ -565,8 +733,9 @@ func TestSSHCredentialResource_Update_InvalidPlan(t *testing.T) {
 
 	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: s}}
 	r.Update(context.Background(), resource.UpdateRequest{
-		State: tfsdk.State{Schema: s, Raw: bad},
-		Plan:  tfsdk.Plan{Schema: s, Raw: bad},
+		State:  tfsdk.State{Schema: s, Raw: bad},
+		Plan:   tfsdk.Plan{Schema: s, Raw: bad},
+		Config: tfsdk.Config{Schema: s, Raw: bad},
 	}, resp)
 
 	if !resp.Diagnostics.HasError() {
