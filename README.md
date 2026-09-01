@@ -46,7 +46,7 @@ resource "truenas_dataset" "example" {
 ## Features
 
 - **Data Sources**: Query pools and datasets
-- **Resources**: Manage datasets, host paths, files, and applications
+- **Resources**: Manage datasets, host paths, files, applications, users, and groups
 
 ## Documentation
 
