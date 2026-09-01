@@ -1,8 +1,8 @@
 # Push nightly snapshots of an archive dataset to a backup host over SSH.
 #
-# The SSH connection is a keychain credential of type SSH_CREDENTIALS. The
-# provider does not manage keychain credentials, so create it in the TrueNAS
-# UI under Credentials > Backup Credentials and reference its numeric ID.
+# The SSH connection is a keychain credential of type SSH_CREDENTIALS. Manage it
+# with truenas_ssh_credential and pass its id, or reference the numeric ID of a
+# credential created outside Terraform, as this example does.
 variable "backup_ssh_credential" {
   description = "ID of the SSH_CREDENTIALS keychain credential for the backup host."
   type        = number
