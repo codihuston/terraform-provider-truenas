@@ -1,0 +1,73 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+### Nightly Recursive Snapshots
+
+{{ tffile "examples/resources/snapshot_task/main.tf" }}
+
+### Hourly Snapshots Within a Maintenance Window
+
+```terraform
+resource "truenas_snapshot_task" "hourly" {
+  dataset = "tank/vm"
+
+  naming_schema  = "hourly-%Y-%m-%d_%H-%M"
+  lifetime_value = 48
+  lifetime_unit  = "HOUR"
+
+  schedule = {
+    minute = "0"
+    hour   = "*"
+    begin  = "18:00"
+    end    = "06:00"
+  }
+}
+```
+
+### Recursive Snapshots Excluding a Child Dataset
+
+```terraform
+resource "truenas_snapshot_task" "weekly" {
+  dataset   = "tank/data"
+  recursive = true
+  exclude   = ["tank/data/scratch"]
+
+  naming_schema  = "weekly-%Y-%m-%d"
+  lifetime_value = 3
+  lifetime_unit  = "MONTH"
+
+  schedule = {
+    minute = "0"
+    hour   = "1"
+    dow    = "7"
+  }
+}
+```
+
+> **Note:** `dataset` is a ZFS dataset name such as `tank/data`, not a mount point. Use a dataset resource's `id` attribute rather than its `full_path`.
+
+> **Note:** `naming_schema` must include enough strftime time fields to give every run a distinct snapshot name; TrueNAS rejects a schema that could collide.
+
+> **Note:** `exclude` is only accepted when `recursive` is `true`. TrueNAS rejects the combination on apply.
+
+> **Note:** Deleting a task leaves the snapshots it already took in place.
+
+## Import
+
+Periodic snapshot tasks can be imported using the numeric task ID:
+
+```shell
+terraform import truenas_snapshot_task.example 1
+```
+
+{{ .SchemaMarkdown | trimspace }}

@@ -323,7 +323,7 @@ func enoentRPCError() *client.JSONRPCError {
 	}
 }
 
-func TestIsNFSNotFoundError(t *testing.T) {
+func TestIsNotFoundError(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
@@ -347,8 +347,8 @@ func TestIsNFSNotFoundError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isNFSNotFoundError(tt.err); got != tt.want {
-				t.Errorf("isNFSNotFoundError(%v) = %v, want %v", tt.err, got, tt.want)
+			if got := isNotFoundError(tt.err); got != tt.want {
+				t.Errorf("isNotFoundError(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

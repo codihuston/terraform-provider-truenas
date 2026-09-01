@@ -383,24 +383,3 @@ func TestUserService_AcceptsRealClient(t *testing.T) {
 	// The service must accept a client.Client, which is what the provider wires in.
 	_ = NewUserService(&client.MockClient{})
 }
-
-func TestIsNotFoundError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{name: "nil", err: nil},
-		{name: "missing user", err: errors.New("[ENOENT] None: User 1 does not exist"), want: true},
-		{name: "enoent", err: errors.New("[ENOENT] something"), want: true},
-		{name: "other", err: errors.New("connection refused")},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isNotFoundError(tc.err); got != tc.want {
-				t.Errorf("expected %v, got %v", tc.want, got)
-			}
-		})
-	}
-}
