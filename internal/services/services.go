@@ -22,4 +22,9 @@ type TrueNASServices struct {
 	Snapshot   truenas.SnapshotServiceAPI
 	Virt       truenas.VirtServiceAPI
 	VM         truenas.VMServiceAPI
+
+	// Group and User are implemented in this package because truenas-go does
+	// not yet cover the group.* and user.* namespaces.
+	Group GroupServiceAPI
+	User  UserServiceAPI
 }

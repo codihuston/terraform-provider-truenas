@@ -33,6 +33,12 @@ Run them with `mise run test-acc` after exporting:
 Tests must assert server-side state through the API (not just Terraform state)
 and clean up after themselves via `CheckDestroy`.
 
+The SSH connection is not optional even for the WebSocket transport: SSH detects
+the TrueNAS version and backs the file operations, and the client runs `midclt`
+under `sudo`, so the SSH account needs passwordless sudo as well as an authorised
+key. To drive a resource by hand instead, build the provider and point Terraform
+at it with a `dev_overrides` CLI configuration.
+
 ### Design and implementation plans
 
 When asked to write an implementation plan, the context should include the current code coverage from `mise run coverage`. In the verification tasks, verify that the code coverage has either improved or maintained with the baseline. 

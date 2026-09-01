@@ -1,0 +1,102 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/user/main.tf" }}
+
+## Authentication
+
+Accounts are created without a password unless `password` is set, so the default
+account authenticates with an SSH key or not at all. Set `password_disabled` to
+make that explicit and to reject password authentication outright.
+
+TrueNAS writes `ssh_public_key` into the account's home directory, so a key-only
+account needs a writable home. `home` defaults to `/var/empty`, which is not
+writable; set `home` and `home_create` to have TrueNAS create one.
+
+`smb` is disabled by default. TrueNAS requires password authentication for SMB
+users and adds them to the `builtin_users` group, neither of which suits a
+key-only account. Enabling `smb` therefore requires `password` and forbids
+`password_disabled`.
+
+## Passwords
+
+`password` is a [write-only attribute][write-only]: Terraform sends it to
+TrueNAS but never writes it to state, and TrueNAS never returns it. A password
+changed outside Terraform produces **no drift**, and there is no way for the
+provider to detect one.
+
+Because there is nothing in state to compare against, changing the value in the
+configuration is not enough to re-send it. Increment `password_wo_version` to
+send the current `password` on the next apply:
+
+```terraform
+resource "truenas_user" "support" {
+  username  = "support"
+  full_name = "Support Account"
+
+  group_create = true
+
+  password            = var.support_password
+  password_wo_version = 2
+}
+```
+
+`password` and `password_wo_version` must be configured together. Bumping the
+version without a password would record a rotation that never happened, so the
+provider rejects either one on its own at plan time.
+
+Write-only attributes require Terraform 1.11 or later.
+
+[write-only]: https://developer.hashicorp.com/terraform/language/resources/ephemeral/write-only
+
+## Home directories
+
+When `home_create` is set, TrueNAS creates the home directory at
+`<home>/<username>` rather than at `home` itself. `home` is therefore the parent
+directory, and the path TrueNAS actually assigned is exported as `home_path`.
+
+`home_create` is only sent when `home` changes. While `home` stays put the
+provider sends `home_path` instead, because TrueNAS accepts a parent directory
+only when creating a home and rejects it on a later update.
+
+`home`, `home_create` and `home_mode` are inputs TrueNAS does not report back,
+so changes made to them outside Terraform are not detected. After an import
+`home` is seeded from the path TrueNAS assigned, which matches the configuration
+when the home directory was supplied verbatim but is the created
+`<home>/<username>` directory when the account was created with `home_create`;
+the first plan after such an import therefore shows a change to `home`.
+`home_create` and `home_mode` fall back to their defaults, because TrueNAS never
+reports them.
+
+## Group membership
+
+`group` and `groups` take group *entry IDs*, as exported by
+`truenas_group.<name>.id`, not Unix GIDs.
+
+TrueNAS adds SMB users to `builtin_users` itself. The provider ignores exactly
+that group when it reconciles `groups`, so enabling `smb` alongside an explicit
+`groups` neither fails the apply nor produces a diff. Every other membership
+change made outside Terraform is reported as drift.
+
+Leave `groups` unset to let TrueNAS manage supplementary membership entirely.
+Set it to `[]` to remove all supplementary groups.
+
+## Import
+
+Users can be imported using the user entry ID:
+
+```shell
+terraform import truenas_user.deploy 71
+```
+
+{{ .SchemaMarkdown | trimspace }}

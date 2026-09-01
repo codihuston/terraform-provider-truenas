@@ -1,0 +1,34 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/group/main.tf" }}
+
+## Group IDs
+
+TrueNAS distinguishes the group *entry ID* from the Unix *GID*. The `id` attribute
+is the entry ID, and it is what `truenas_user` expects in its `group` and `groups`
+attributes. The `gid` attribute is the Unix GID that appears on the file system.
+
+Membership is managed from the user side, through `truenas_user.groups`. This
+resource does not manage the group's member list, so the two resources cannot
+fight over it.
+
+## Import
+
+Groups can be imported using the group entry ID:
+
+```shell
+terraform import truenas_group.developers 110
+```
+
+{{ .SchemaMarkdown | trimspace }}
