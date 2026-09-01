@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	truenas "github.com/deevus/truenas-go"
-	"github.com/deevus/truenas-go/client"
 	"github.com/deevus/terraform-provider-truenas/internal/datasources"
 	"github.com/deevus/terraform-provider-truenas/internal/resources"
 	"github.com/deevus/terraform-provider-truenas/internal/services"
+	truenas "github.com/deevus/truenas-go"
+	"github.com/deevus/truenas-go/client"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -381,6 +381,7 @@ func (p *TrueNASProvider) Configure(ctx context.Context, req provider.ConfigureR
 		Cron:       truenas.NewCronService(finalClient, version),
 		Dataset:    truenas.NewDatasetService(finalClient, version),
 		Filesystem: truenas.NewFilesystemService(finalClient, version),
+		SharingNFS: services.NewSharingNFSService(finalClient),
 		Snapshot:   truenas.NewSnapshotService(finalClient, version),
 		Virt:       truenas.NewVirtService(finalClient, version),
 		VM:         truenas.NewVMService(finalClient, version),
@@ -410,6 +411,7 @@ func (p *TrueNASProvider) Resources(ctx context.Context) []func() resource.Resou
 		resources.NewCloudSyncCredentialsResource,
 		resources.NewCloudSyncTaskResource,
 		resources.NewCronJobResource,
+		resources.NewShareNFSResource,
 		resources.NewVirtConfigResource,
 		resources.NewVirtInstanceResource,
 		resources.NewAppRegistryResource,
