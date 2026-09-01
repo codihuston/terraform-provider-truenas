@@ -1,0 +1,58 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+~> **Destroying this resource stops the service and disables it at boot.** TrueNAS system services are part of the appliance: they cannot be created or deleted, only turned on and off. Terraform therefore treats `terraform destroy` — and any change that forces replacement — as "give the service back", which means stopping it and clearing its start-on-boot flag. Anything relying on that service goes offline. This is the same posture other providers take for resources that configure something they did not create.
+
+## Example Usage
+
+### Enable and Start a Service
+
+{{ tffile "examples/resources/service/main.tf" }}
+
+### Enable at Boot Without Starting Now
+
+```terraform
+resource "truenas_service" "smb" {
+  name    = "cifs"
+  enable  = true
+  running = false
+}
+```
+
+### Run a Service Without Enabling It at Boot
+
+```terraform
+resource "truenas_service" "ssh" {
+  name    = "ssh"
+  enable  = false
+  running = true
+}
+```
+
+> **Note:** Manage each service with at most one `truenas_service` resource. Two resources naming the same service fight over its state on every apply.
+
+> **Note:** `name` is the service's API name, which is not always its display name — SMB is `cifs` and iSCSI is `iscsitarget`. The available names depend on the TrueNAS version and edition; applying an unknown name fails with the list the appliance does offer.
+
+> **Note:** Applying fails if the service does not reach the requested state — for example a service that starts and then exits because of its own configuration. The state Terraform records is the one the server reported, so a following plan shows the difference rather than hiding it.
+
+> **Note:** Changing `name` replaces the resource, which stops and disables the old service before adopting the new one.
+
+## Import
+
+Services are imported by name:
+
+```shell
+terraform import truenas_service.nfs nfs
+```
+
+Importing adopts the service as it is; the following `terraform apply` brings it to the configured `enable` and `running` state.
+
+{{ .SchemaMarkdown | trimspace }}
