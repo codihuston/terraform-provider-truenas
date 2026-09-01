@@ -71,11 +71,12 @@ Two further consequences are worth stating plainly:
   stays empty. Set `remote_host_key` explicitly and Terraform will report and
   correct a configuration that no longer matches the appliance.
 * Changing `host` or `port` while `remote_host_key` is unset does scan afresh,
-  so the stored key always belongs to the host recorded alongside it. That scan
-  is a new trust-on-first-use event carrying the same implications as the first:
-  the new host is trusted on whatever answers at that moment, and nothing
-  verifies it is the intended machine. An unreachable new host fails the apply
-  and the connection keeps its previous host key.
+  so the stored key always belongs to the host recorded alongside it. The plan
+  shows `remote_host_key` as known after apply, and the scan is a new
+  trust-on-first-use event carrying the same implications as the first: the new
+  host is trusted on whatever answers at that moment, and nothing verifies it is
+  the intended machine. An unreachable new host fails the apply and the
+  connection keeps its previous host key.
 
 Set `remote_host_key` from a key obtained over a channel you already trust when
 the connection matters. `ssh-keyscan` on a trusted network produces the format
@@ -136,7 +137,7 @@ carries its own import caveats.
 
 - `connect_timeout` (Number) Seconds to wait for the remote host to accept a connection.
 - `port` (Number) Port the remote SSH server listens on.
-- `remote_host_key` (String) Public host keys the remote host is trusted to present, one per line, in `known_hosts` format without the leading host field. Leave it unset to have TrueNAS scan the host once, when the connection is created, and trust whatever answers — an unchanged host is not re-verified afterwards, so a host key that changes later is neither detected nor reported as drift. Changing `host` or `port` while this attribute is unset scans afresh, which is a new trust-on-first-use event with the same implications as the first: the new host is trusted on whatever answers at that moment, and nothing verifies it is the intended machine.
+- `remote_host_key` (String) Public host keys the remote host is trusted to present, one per line, in `known_hosts` format without the leading host field. Leave it unset to have TrueNAS scan the host once, when the connection is created, and trust whatever answers — an unchanged host is not re-verified afterwards, so a host key that changes later is neither detected nor reported as drift. Changing `host` or `port` while this attribute is unset plans it as known after apply and scans afresh, which is a new trust-on-first-use event with the same implications as the first: the new host is trusted on whatever answers at that moment, and nothing verifies it is the intended machine.
 - `username` (String) Account to log in to the remote host as.
 
 ### Read-Only

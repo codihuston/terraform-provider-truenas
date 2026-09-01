@@ -103,14 +103,14 @@ func (r *SSHCredentialResource) Schema(ctx context.Context, req resource.SchemaR
 					"have TrueNAS scan the host once, when the connection is created, and trust " +
 					"whatever answers — an unchanged host is not re-verified afterwards, so a host " +
 					"key that changes later is neither detected nor reported as drift. Changing " +
-					"`host` or `port` while this attribute is unset scans afresh, which is a new " +
-					"trust-on-first-use event with the same implications as the first: the new host " +
-					"is trusted on whatever answers at that moment, and nothing verifies it is the " +
-					"intended machine.",
+					"`host` or `port` while this attribute is unset plans it as known after apply " +
+					"and scans afresh, which is a new trust-on-first-use event with the same " +
+					"implications as the first: the new host is trusted on whatever answers at " +
+					"that moment, and nothing verifies it is the intended machine.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					remoteHostKeyPlanModifier(),
 				},
 			},
 			"connect_timeout": schema.Int64Attribute{
